@@ -1,0 +1,27 @@
+{
+	"name": "Rumble",
+	"description": "A plugin that adds Rumble as a source",
+	"author": "FUTO",
+	"authorUrl": "https://futo.org",
+	
+	"sourceUrl": "https://plugins.grayjay.app/Rumble/RumbleConfig.json",
+	"repositoryUrl": "https://futo.org",
+	"scriptUrl": "./RumbleScript.js",
+	"version": 26,
+	"iconUrl": "./rumble.png",
+	"id": "2ce7b35e-d2b2-4adb-a728-a34a30d30359",
+
+	"scriptSignature": "",
+	"scriptPublicKey": "",
+	"packages": ["Http","DOMParser"],
+	
+	"allowEval": false,
+	"allowUrls": [
+		"everywhere"
+	],
+	
+	"authentication": {
+		"loginUrl": "https://rumble.com/login.php",
+		"cookiesToFind": [ "u_s" ]
+	}
+}

@@ -1,0 +1,806 @@
+const URL_BASE = "https://rumble.com";
+const URL_VIDEOS = `${URL_BASE}/videos`;
+const URL_SEARCH = `${URL_BASE}/search/video`;
+const URL_BASE_CHANNEL = `${URL_BASE}/c/`;
+const URL_BASE_CHANNEL_ALT = `${URL_BASE}/user/`;
+const URL_BASE_VIDEO = `${URL_BASE}/v`;
+const URL_VIDEO_DETAIL = `${URL_BASE}/embedJS/u3/`;
+const URL_COMMENTS = "https://rumble.com/service.php?name=comment.list&video=";
+
+const REGEX_HUMAN_AGO = new RegExp("([0-9]*) ([a-zA-Z]*) ago");
+const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+) \{ background-image: url\("?([^"\)]+)"?\)/g;
+const REGEX_USER_IMAGE = /user-image--img--id-([0-9a-z]+)/;
+const REGEX_VIDEO_IMAGE_CSS = /.video-item--by-a--([0-9a-z]+)::before \{ background-image: url\("?([^"\)]+)"?\)/g;
+const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
+const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
+
+const PLATFORM = "Rumble";
+
+var config = {};
+
+//Source Methods
+source.enable = function(conf){
+	config = conf ?? {};
+	log(config);
+}
+source.getHome = function () {
+	return getVideosPager(URL_VIDEOS, {
+		sort: "views",
+		date: "today"
+		//page: 1
+	});
+};
+
+source.searchSuggestions = function(query) {
+	return [];
+};
+source.getSearchCapabilities = () => {
+	return {
+		types: [Type.Feed.Mixed],
+		sorts: [Type.Order.Chronological, "relevance", "rumbles", "views"],
+		filters: [
+			{
+				id: "date",
+				name: "Date",
+				isMultiSelect: false,
+				filters: [
+					{ id: Type.Date.Today, name: "Today", value: "today" },
+					{ id: Type.Date.LastWeek, name: "Last week", value: "this-week" },
+					{ id: Type.Date.LastMonth, name: "Last month", value: "this-month" },
+					{ id: Type.Date.LastYear, name: "Last year", value: "this-year" }
+				]
+			},
+			{
+				id: "duration",
+				name: "Duration",
+				isMultiSelect: false,
+				filters: [
+					{ id: Type.Duration.Short, name: "Short", value: "short" },
+					{ id: Type.Duration.Long, name: "Long", value: "long" }
+				]
+			},
+			{
+				id: "license",
+				name: "License",
+				isMultiSelect: false,
+				filters: [
+					{ name: "Now", value: "now" }
+				]
+			}
+		]
+	};
+}
+source.search = function (query, type, order, filters) {
+	let sort = order;
+	if (sort === Type.Order.Chronological) {
+		sort = "date";
+	}
+
+	let date = null;
+	if (filters && filters["date"]) {
+		date = filters["date"][0];
+	}
+
+	let duration = null;
+	if (filters && filters["duration"]) {
+		duration = filters["duration"][0];
+	}
+
+	let license = null;
+	if (filters && filters["license"]) {
+		license = filters["license"][0];
+	}
+
+	return getVideosPager(URL_SEARCH, {
+		q: query,
+		sort: sort,
+		date: date,
+		duration: duration,
+		license: license
+	});
+};
+
+//Channel
+source.isChannelUrl = function(url) {
+	return url.startsWith(URL_BASE_CHANNEL) || url.startsWith(URL_BASE_CHANNEL_ALT);
+};
+source.getChannel = function (url) {
+	const res = http.GET(url, {});
+
+	if (res.code == 200) {
+		const prefix = url.startsWith(URL_BASE_CHANNEL) ? "channel" : "listing";
+		const doc = domParser.parseFromString(res.body, "text/html");
+		const title = firstByTagOrNull(firstByClassOrNull(doc, `${prefix}-header--title`), "h1");
+		const img = firstByClassOrNull(doc, `${prefix}-header--thumb`);
+		const banner = firstByClassOrNull(doc, `${prefix}-header--backsplash-img`);
+		const subscribers = firstByClassOrNull(doc, `${prefix}-header--followers`);
+		const subscribersText = subscribers?.textContent;
+		const subscriberCount = subscribersText ? subscribersText.substring(0, subscribersText.length - " Followers".length) : null;
+
+		const channel = new PlatformChannel({
+			id: new PlatformID(PLATFORM, getAuthorIdFromUrl(url), config.id),
+			name: title?.textContent ?? "",
+			thumbnail: img?.getAttribute("src"),
+			banner: banner?.getAttribute("src"),
+			subscribers: fromHumanNumber(subscriberCount) ?? 0,
+			description: "",
+			url: url,
+			links: {}
+		});
+		//doc.dispose();
+		return channel;
+	}
+
+	return null;
+};
+source.getChannelContents = function (url) {
+	return getVideosPager(url, {});
+};
+
+//Video
+source.isContentDetailsUrl = function(url) {
+	return url.startsWith(URL_BASE_VIDEO);
+};
+source.getContentDetails = function(url) {
+	const res = http.GET(url, {});
+
+	if (res.code == 200) {
+		const doc = domParser.parseFromString(res.body, "text/html");
+		const userImages = getUserImageList(res.body);
+
+		/** @type {Array} */		
+		let ldJson = null;
+		const scriptElements = doc.getElementsByTagName("script");
+
+		for (let i = 0; i < scriptElements.length; i++) {
+			if (scriptElements[i].getAttribute("type") === "application/ld+json") {
+				ldJson = JSON.parse(scriptElements[i].text);
+				break;
+			}
+		}
+
+		const vid = findVideoId(res.body);
+		const resTracks = http.GET(`${URL_VIDEO_DETAIL}${buildQuery({
+			request: "video",
+			ver: 2,
+			v: vid
+		})}`, {});
+
+		if (res.code != 200) {
+			return null;
+		}
+
+		const videoDetail = JSON.parse(resTracks.body);
+		const sources = [];
+		for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
+			for (const [resolution, data] of Object.entries(resolutions)) {
+				sources.push(new VideoUrlSource({
+					name: `Original ${resolution}P`,
+					url: data.url,
+					width: data.meta.w,
+					height: data.meta.h,
+					bitrate: data.meta.bitrate,
+					duration: videoDetail.duration ?? -1,
+					container: `video/${containerName}`
+				}));
+			}
+		}
+
+		let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
+		const authorThumbnail = firstByClassOrNull(doc, "user-image");
+		const authorHref = firstByClassOrNull(doc, "media-by--a");
+		const authorId = getAuthorIdFromUrl(authorHref.getAttribute("href"));
+
+		const authorThumbnailUrl = userImages[getThumbnailId(authorThumbnail)];
+		const thumbnailUrl = videoObject?.thumbnailUrl;
+		const thumbnails = [];
+		if (thumbnailUrl) {
+			thumbnails.push(new Thumbnail(thumbnailUrl, 0));
+		}
+
+		const userInteractionCount = videoObject?.interactionStatistic?.userInteractionCount;
+		const idStart = `${URL_BASE}/`.length;
+		const id = getVideoIdFromUrl(url);
+
+		const vote = firstByClassOrNull(doc, "rumbles-vote");
+		const upVotes = firstByClassOrNull(vote, "rumbles-up-votes");
+		const downVotes = firstByClassOrNull(vote, "rumbles-down-votes");
+		const rating = new RatingLikesDislikes(fromHumanNumber(upVotes?.text), fromHumanNumber(downVotes?.text));		
+
+		//doc.dispose();
+
+		return new PlatformVideoDetails({
+			id: new PlatformID(PLATFORM, id, config.id),
+			name: videoDetail.title ?? "",
+			thumbnails: new Thumbnails(thumbnails),
+			author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id), 
+				videoDetail.author.name ?? "", 
+				videoDetail.author.url,
+				authorThumbnailUrl ?? null),
+			datetime: dateToUnixTime(videoObject?.uploadDate),
+			duration: videoDetail.duration ?? -1,
+			viewCount: (userInteractionCount ? Number.parseInt(userInteractionCount) : 0),
+			url: url,
+			isLive: false,
+			description: videoObject?.description ?? "",
+			rating,
+			video: new VideoSourceDescriptor(sources)
+		});
+	}
+
+	return null;
+};
+
+source.getComments = function (url) {
+	if (!bridge.isLoggedIn()) {
+		return new CommentPager([], false, {});
+	}
+
+	const comments = [];
+	const res = http.GET(url, {});
+	let lastDepth = 0;
+	let lastCommentPerLevel = {};
+	if (res.code == 200) {
+		const vid = findVideoId(res.body).substring(1);		
+		const commentsRes = http.GET(URL_COMMENTS + vid, {}, true);
+		if (commentsRes.code == 200) {
+			const obj = JSON.parse(commentsRes.body);
+
+			const userImages = getUserImageList(obj.css_libs.global);			
+			const doc = domParser.parseFromString(obj.html, "text/html");
+			const elements = doc.getElementsByClassName("comment-item");
+			for (let i = 0; i < elements.length && i < 200; i++) { //i<200 temporary constraint to avoid crash
+				/** @type {Element} */
+				const e = elements[i];
+
+				let isCreate = false;
+				for (let i = 0; i < e.classList.length; i++) {
+					if (e.classList[i] === "comments-create") {
+						isCreate = true;
+						break;
+					}
+				}
+				
+				if (isCreate) {
+					continue;
+				}
+
+				const author = firstByClassOrNull(e, "comments-meta-author");
+				const authorId = getAuthorIdFromUrl(authorHref);
+				const time = firstByClassOrNull(e, "comments-meta-post-time");
+				const text = firstByClassOrNull(e, "comment-text");
+				const thumbnail = firstByClassOrNull(e, "user-image--img");
+
+				const authorThumbnailUrl = userImages[getThumbnailId(thumbnail)];
+				const replyCount = e.getAttribute("data-num-replies");
+
+				let depth = 0;
+				const match = e.parentNode?.className.match(/^comments-(\d+)$/);
+				if (match) {
+					depth = parseInt(match[1]);
+
+					if (isNaN(depth)) {
+						depth = 0;
+					} else {
+						depth = depth - 1;
+					}
+				}
+
+				const c = new RumbleComment({
+					contextUrl: url,
+					author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id),
+						author.textContent ?? "",
+						asAbsoluteURL(author?.getAttribute("href")),
+						asAbsoluteURL(authorThumbnailUrl) ?? ""),
+					message: text?.textContent ?? "",
+					date: extractAgoText_Timestamp(time?.textContent),
+					replyCount: replyCount != null ? parseInt(replyCount) : 0,
+					replies: []
+				});
+
+				lastCommentPerLevel[depth] = c;
+
+				if (depth == 0) {
+					comments.push(c);
+				} else {
+					lastCommentPerLevel[depth - 1].replies.push(c);
+				}
+
+				lastDepth = depth;
+
+                //e.dispose();
+			}
+            //doc.dispose();
+		}
+	}
+	
+	return new RumbleCommentPager(comments.slice(0, 10), 20);
+}
+
+source.getUserSubscriptions = function() {
+	if (!bridge.isLoggedIn()) {
+		bridge.log("Failed to retrieve subscriptions page because not logged in.");
+		return [];
+	}
+	
+	const res = http.GET("https://rumble.com/account/channel/subscriptions", {});
+	if (res.code != 200) {
+		bridge.log("Failed to retrieve subscriptions page.");
+		return [];
+	}
+
+	const channelUrls = [];	
+	const doc = domParser.parseFromString(res.body, "text/html");
+	const aElements = doc.getElementsByTagName("a");
+	bridge.log(aElements.length.toString() + " elements found");
+
+	for (let i = 0; i < aElements.length; i++) {
+		const href = aElements[i].getAttribute("href").toLowerCase();
+		if (href.startsWith("/c/") || href.startsWith("/user/")) {
+			channelUrls.push(asAbsoluteURL(href));
+		}
+	}
+
+	bridge.log(channelUrls.length.toString() + " channels found");
+
+	//doc.dispose();
+	return channelUrls;
+}
+
+//#region Pagers
+class RumbleVideoPager extends VideoPager {
+	constructor(results, hasMore, url, params) {
+		super(results, hasMore, { url, params });
+	}
+	
+	nextPage() {
+		const newParams = { ... this.context.params, page: (this.context.params.page ?? 1) + 1 };
+		return getVideosPager(this.context.url, newParams);
+	}
+}
+
+class RumbleCommentPager extends CommentPager {
+	constructor(allResults, pageSize) {
+		const end = Math.min(pageSize, allResults.length);
+		const results = allResults.slice(0, end);
+		const hasMore = pageSize < allResults.length;
+		super(results, hasMore, {});
+
+		this.offset = end;
+		this.allResults = allResults;
+		this.pageSize = pageSize;
+	}
+
+	nextPage() {
+		const end = Math.min(offset + this.pageSize, this.allResults.length);
+		this.results = this.allResults.slice(offset, end - this.offset);
+		this.offset = end;
+		this.hasMore = this.offset + this.pageSize < this.allResults.length;
+		return this;
+	}
+}
+//#endregion
+
+//#region Parsing
+
+/**
+ * Gets the thumbnail URL for an element
+ * @param {Element?} e The element
+ * @returns {String?} The thumbnail URL
+ */
+function getThumbnailId(e) {
+	if (!e) {
+		return null;
+	}
+
+	for (let i = 0; i < e.classList.length; i++) {
+		const className = e.classList[i];
+		const match = REGEX_USER_IMAGE.exec(className);
+
+		if (match) {
+			return match[1];
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Gets the video id from an URL
+ * @param {String?} url The URL
+ * @returns {String?} The video id
+ */
+function getVideoIdFromUrl(url) {
+	if (!url) {
+		return null;
+	}
+
+	const match = REGEX_VIDEO_ID.exec(url);
+	return match ? match[1] : null;
+}
+
+/**
+ * Gets the author id from an URL
+ * @param {String?} url The URL
+ * @returns {String?} The author id
+ */
+function getAuthorIdFromUrl(url) {
+	if (!url) {
+		return null;
+	}
+
+	if (url.startsWith('https://rumble.com')) {
+		url = url.substring('https://rumble.com'.length);
+	}
+
+	if (url.startsWith('http://rumble.com')) {
+		url = url.substring('https://rumble.com'.length);
+	}
+
+	if (url.startsWith('/user/')) {
+		return url.substring(1);
+	}
+
+	if (url.startsWith('/c/')) {
+		return url.substring(1);
+	}
+
+	return null;
+}
+
+/**
+ * Gets the thumbnail URL for an element
+ * @param {Element?} e The element
+ * @returns {String?} The thumbnail URL
+ */
+function getAuthorThumbnailId(e) {
+	if (!e) {
+		return null;
+	}
+
+	for (let i = 0; i < e.classList.length; i++) {
+		const className = e.classList[i];
+		const match = REGEX_VIDEO_IMAGE.exec(className);
+
+		if (match) {
+			return match[1];
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Gets a map of user images
+ * @param {String} src The source
+ * @returns {Map<String, String>} A user image map
+ */
+function getUserImageList(src) {
+	const userImages = {};
+	for (const userImage of src.matchAll(REGEX_USER_IMAGE_CSS)) {
+		userImages[userImage[1]] = userImage[2];
+	}
+	return userImages;
+}
+
+/**
+ * Gets a map of author images
+ * @param {String} src The source
+ * @returns {Map<String, String>} A author image map
+ */
+function getAuthorImageList(src) {
+	const authorImages = {};
+	for (const authorImage of src.matchAll(REGEX_VIDEO_IMAGE_CSS)) {
+		authorImages[authorImage[1]] = authorImage[2];
+	}
+	return authorImages;
+}
+
+/**
+ * Parse a HTML video-listing-entry element to a JSON element
+ * @param {Document} doc HTML doc
+ * @param {Map<String, String>} userImage The images map
+ * @returns {PlatformVideo} Platform video
+ */
+function parseVideoListingEntry(authorImages, e) {
+	const a = firstByClassOrNull(e, "video-item--a");
+	const img = firstByClassOrNull(e, "video-item--img");
+	const duration = firstByClassOrNull(e, "video-item--duration");
+	const time = firstByClassOrNull(e, "video-item--time");
+	const title = firstByClassOrNull(e, "video-item--title");
+	const author = firstByClassOrNull(e, "video-item--by-a");
+	const views = firstByClassOrNull(e, "video-item--views");
+
+	const thumbnails = [];
+	if (img) {
+		const src = img.getAttribute("src");
+		if (src) {
+			thumbnails.push(new Thumbnail(src, 0));
+		}
+	}
+
+	const authorHref = author?.getAttribute("href");
+	const authorThumbnailUrl = authorImages[getAuthorThumbnailId(author)];
+	const authorId = getAuthorIdFromUrl(authorHref);
+
+	const url = a?.getAttribute("href");
+	const id = getVideoIdFromUrl(url);
+
+	return new PlatformVideo({
+		id: new PlatformID(PLATFORM, id, config.id),
+		name: title?.textContent ?? "",
+		thumbnails: new Thumbnails(thumbnails),
+		author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id), 
+			author?.textContent, 
+			asAbsoluteURL(authorHref),
+			asAbsoluteURL(authorThumbnailUrl) ?? ""),
+		uploadDate: dateToUnixTime(time?.getAttribute("datetime")),
+		duration: hhmmssToDuration(duration?.getAttribute("data-value")) ?? 0,
+		viewCount: fromHumanNumber(views?.textContent) ?? 0,
+		url: asAbsoluteURL(url),
+		isLive: false
+	});
+}
+
+/**
+ * Parse a HTML collection video-listing-entry element to a JSON element
+ * @param {Map<String, String>} authorImages The images map
+ * @param {Document} doc HTML doc
+ * @param {HTMLCollectionOf<Element>} elements HTML elements to parse
+ * @returns {PlatformVideo[]} Platform videos
+ */
+function parseVideoListingEntries(authorImages, elements) {
+	const res = [];
+	for (let i = 0; i < elements.length; i++) {
+		const e = elements[i];
+		res.push(parseVideoListingEntry(authorImages, e));
+	}
+
+	return res;
+}
+
+/**
+ * Retrieves the videos pager for a specific page
+ * @param {String} url The base URL
+ * @param {{[key: string]: any}} params Query parameters
+ * @returns {RumbleVideoPager?} Videos pager
+ */
+function getVideosPager(url, params) {
+	const res = http.GET(`${url}${buildQuery(params)}`, { "Cookie": `PNRC=${Math.floor(Math.random() * 312938162)}` });
+
+	if (res.code == 200) {
+		const doc = domParser.parseFromString(res.body, "text/html");
+
+		const authorImages = getAuthorImageList(res.body);
+		const elements = doc.getElementsByClassName("video-listing-entry");
+		const results = parseVideoListingEntries(authorImages, elements);
+
+		const page = params.page ?? 1;
+		let hasMore = false;
+		const nextPageElements = doc.getElementsByClassName("paginator--link");
+		for (let i = 0; i < nextPageElements.length; i++) {
+			const e = nextPageElements[i];
+			const pageString = e?.getAttribute("aria-label");
+			if (pageString == (page + 1).toString()) {
+				hasMore = true;
+				break;
+			}
+		}
+        //doc.dispose();
+		return new RumbleVideoPager(results, hasMore, url, params);
+	}
+
+	return new VideoPager([], false);
+}
+
+/**
+ * Find the video id in a block of text.
+ * @param {String} text
+ */
+function findVideoId(text) {
+	const vidMatch = text.match(/Rumble\(.*?\"video\":\"(.*?)\"/);
+	const vid = vidMatch ? vidMatch[1] : null;
+	return vid;
+}
+
+//#endregion
+
+//#region Html Parsing
+
+/**
+ * Find the first element with a class name
+ * @param {Element?} e HTML element to search
+ * @param {String} className Class name to find
+ * @returns {Element?} The first element with that class name or null
+ */
+function firstByClassOrNull(e, className) {
+	if (!e) {
+		return null;
+	}
+
+	const elements = e.getElementsByClassName(className);
+	if (!elements || elements.length == 0) {
+		return null;
+	}
+
+	return elements[0];
+}
+
+/**
+ * Find the first element with a tag name
+ * @param {Element?} e HTML element to search
+ * @param {String} tagName Tag name to find
+ * @returns {Element?} The first element with that tag name or null
+ */
+function firstByTagOrNull(e, tagName) {
+	if (!e) {
+		return null;
+	}
+
+	const elements = e.getElementsByTagName(tagName);
+	if (!elements || elements.length == 0) {
+		return null;
+	}
+
+	return elements[0];
+}
+
+//#endregion
+
+//#region Utility
+
+/**
+ * Convert a human number i.e. "20.1K" to a machine number i.e. 20100
+ * @param {String?} numStr Human number i.e. "20.1K"
+ * @returns {number?} Machine number
+ */
+function fromHumanNumber(numStr) {
+	if (!numStr) {
+		return null;
+	}
+
+	const num = parseFloat(numStr.substring(0, numStr.length - 1));
+	const lastChar = numStr.charAt(numStr.length - 1).toLowerCase();
+	switch (lastChar) {
+		case 'b':
+			return Math.round(num * 1000000000);
+		case 'm':
+			return Math.round(num * 1000000);
+		case 'k':
+			return Math.round(num * 1000);
+	}
+
+	return Math.round(num);
+}
+
+/**
+ * Build a query
+ * @param {{[key: string]: any}} params Query params
+ * @returns {String} Query string
+ */
+function buildQuery(params) {
+	let query = "";
+	let first = true;
+	for (const [key, value] of Object.entries(params)) {
+		if (value) {
+			if (first) {
+				first = false;
+			} else {
+				query += "&";
+			}
+
+			query += `${key}=${value}`;
+		}
+	}
+
+	return (query && query.length > 0) ? `?${query}` : ""; 
+}
+
+/**
+ * Makes an URL absolute if not absolute already
+ * @param {String?} url URL to make absolute
+ * @returns {String?} Absolute URL
+ */
+function asAbsoluteURL(url) {
+	if (!url) {
+		return null;
+	}
+
+	if (url.startsWith('/')) {
+		return `${URL_BASE}${url}`;
+	}
+	
+	return url;
+}
+
+/**
+ * Convert a Date to a unix time stamp
+ * @param {String?} date Date to convert
+ * @returns {number} Unix time stamp
+ */
+function dateToUnixTime(date) {
+	if (!date) {
+		return 0;
+	}
+
+	return Math.round(Date.parse(date) / 1000);
+}
+
+/**
+ * Format a duration string to a duration in seconds
+ * @param {String?} duration Duration string format (hh:mm:ss)
+ * @returns {number} Duration in seconds
+ */
+function hhmmssToDuration(duration) {
+	if (!duration) {
+		return 0;
+	}
+
+	const parts = duration.split(':').map(Number);
+	if (parts.length == 3) {
+		return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+	} else if (parts.length == 2) {
+		return (parts[0] * 60) + parts[1];
+	} else if (parts.length == 1) {
+		return parts[0];
+	}
+
+	return 0;
+}
+
+/**
+ * Extract a human timestamp (1 day ago) to a number
+ * @param {String?} str Timestamp format (1 day ago)
+ * @returns {number} Time in seconds ago
+ */
+function extractAgoText_Timestamp(str) {
+	if (!str) {
+		return 0;
+	}
+
+	const match = str.match(REGEX_HUMAN_AGO);
+	if(!match)
+		return 0;
+	const value = parseInt(match[1]);
+	const now = parseInt(new Date().getTime() / 1000);
+	switch(match[2]) {
+		case "second":
+		case "seconds":
+			return now - value;
+		case "minute":
+		case "minutes":
+			return now - value * 60;
+		case "hour":
+		case "hours":
+			return now - value * 60 * 60;
+		case "day":
+		case "days":
+			return now - value * 60 * 60 * 24;
+		case "week":
+		case "weeks":
+			return now - value * 60 * 60 * 24 * 7;
+		case "month":
+		case "months":
+			return now - value * 60 * 60 * 24 * 30; //For now it will suffice
+		case "year":
+		case "years":
+			return now - value * 60 * 60 * 24 * 365;
+		default:
+			throw new ScriptException("Unknown time type: " + match[2]);
+	}
+}
+
+class RumbleComment extends Comment {
+	constructor(obj) {
+		super(obj);
+		this.replies = obj.replies;
+	}
+
+	getReplies() {
+		return new RumbleCommentPager(this.replies.slice(10), 20);
+	}
+}
+
+//#endregion
+
+log("LOADED");
