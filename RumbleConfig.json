@@ -7,7 +7,7 @@
 	"sourceUrl": "https://plugins.grayjay.app/Rumble/RumbleConfig.json",
 	"repositoryUrl": "https://futo.org",
 	"scriptUrl": "./RumbleScript.js",
-	"version": 26,
+	"version": 27,
 	"iconUrl": "./rumble.png",
 	"id": "2ce7b35e-d2b2-4adb-a728-a34a30d30359",
 
@@ -23,5 +23,7 @@
 	"authentication": {
 		"loginUrl": "https://rumble.com/login.php",
 		"cookiesToFind": [ "u_s" ]
-	}
+	},
+
+	"supportedClaimTypes": [4]
 }

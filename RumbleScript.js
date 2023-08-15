@@ -15,6 +15,7 @@ const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
 const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
 
 const PLATFORM = "Rumble";
+const PLATFORM_CLAIMTYPE = 4;
 
 var config = {};
 
@@ -118,7 +119,7 @@ source.getChannel = function (url) {
 		const subscriberCount = subscribersText ? subscribersText.substring(0, subscribersText.length - " Followers".length) : null;
 
 		const channel = new PlatformChannel({
-			id: new PlatformID(PLATFORM, getAuthorIdFromUrl(url), config.id),
+			id: new PlatformID(PLATFORM, getAuthorIdFromUrl(url), config.id, PLATFORM_CLAIMTYPE),
 			name: title?.textContent ?? "",
 			thumbnail: img?.getAttribute("src"),
 			banner: banner?.getAttribute("src"),
@@ -213,7 +214,7 @@ source.getContentDetails = function(url) {
 			id: new PlatformID(PLATFORM, id, config.id),
 			name: videoDetail.title ?? "",
 			thumbnails: new Thumbnails(thumbnails),
-			author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id), 
+			author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id, PLATFORM_CLAIMTYPE), 
 				videoDetail.author.name ?? "", 
 				videoDetail.author.url,
 				authorThumbnailUrl ?? null),
@@ -288,7 +289,7 @@ source.getComments = function (url) {
 
 				const c = new RumbleComment({
 					contextUrl: url,
-					author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id),
+					author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id, PLATFORM_CLAIMTYPE),
 						author.textContent ?? "",
 						asAbsoluteURL(author?.getAttribute("href")),
 						asAbsoluteURL(authorThumbnailUrl) ?? ""),
@@ -530,7 +531,7 @@ function parseVideoListingEntry(authorImages, e) {
 		id: new PlatformID(PLATFORM, id, config.id),
 		name: title?.textContent ?? "",
 		thumbnails: new Thumbnails(thumbnails),
-		author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id), 
+		author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id, PLATFORM_CLAIMTYPE), 
 			author?.textContent, 
 			asAbsoluteURL(authorHref),
 			asAbsoluteURL(authorThumbnailUrl) ?? ""),
