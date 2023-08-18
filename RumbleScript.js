@@ -138,6 +138,15 @@ source.getChannelContents = function (url) {
 	return getVideosPager(url, {});
 };
 
+source.getChannelTemplateByClaimMap = () => {
+    return {
+        //Rumble
+        4: {
+            0: URL_BASE + "/{{CLAIMVALUE}}"
+        }
+    };
+};
+
 //Video
 source.isContentDetailsUrl = function(url) {
 	return url.startsWith(URL_BASE_VIDEO);
