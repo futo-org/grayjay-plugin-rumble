@@ -153,92 +153,90 @@ source.isContentDetailsUrl = function(url) {
 };
 source.getContentDetails = function(url) {
 	const res = http.GET(url, {});
-
-	if (res.code == 200) {
-		const doc = domParser.parseFromString(res.body, "text/html");
-		const userImages = getUserImageList(res.body);
-
-		/** @type {Array} */		
-		let ldJson = null;
-		const scriptElements = doc.getElementsByTagName("script");
-
-		for (let i = 0; i < scriptElements.length; i++) {
-			if (scriptElements[i].getAttribute("type") === "application/ld+json") {
-				ldJson = JSON.parse(scriptElements[i].text);
-				break;
-			}
-		}
-
-		const vid = findVideoId(res.body);
-		const resTracks = http.GET(`${URL_VIDEO_DETAIL}${buildQuery({
-			request: "video",
-			ver: 2,
-			v: vid
-		})}`, {});
-
-		if (res.code != 200) {
-			return null;
-		}
-
-		const videoDetail = JSON.parse(resTracks.body);
-		const sources = [];
-		for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
-			for (const [resolution, data] of Object.entries(resolutions)) {
-				sources.push(new VideoUrlSource({
-					name: `Original ${resolution}P`,
-					url: data.url,
-					width: data.meta.w,
-					height: data.meta.h,
-					bitrate: data.meta.bitrate,
-					duration: videoDetail.duration ?? -1,
-					container: `video/${containerName}`
-				}));
-			}
-		}
-
-		let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
-		const authorThumbnail = firstByClassOrNull(doc, "user-image");
-		const authorHref = firstByClassOrNull(doc, "media-by--a");
-		const authorId = getAuthorIdFromUrl(authorHref.getAttribute("href"));
-
-		const authorThumbnailUrl = userImages[getThumbnailId(authorThumbnail)];
-		const thumbnailUrl = videoObject?.thumbnailUrl;
-		const thumbnails = [];
-		if (thumbnailUrl) {
-			thumbnails.push(new Thumbnail(thumbnailUrl, 0));
-		}
-
-		const userInteractionCount = videoObject?.interactionStatistic?.userInteractionCount;
-		const idStart = `${URL_BASE}/`.length;
-		const id = getVideoIdFromUrl(url);
-
-		const vote = firstByClassOrNull(doc, "rumbles-vote");
-		const upVotes = firstByClassOrNull(vote, "rumbles-up-votes");
-		const downVotes = firstByClassOrNull(vote, "rumbles-down-votes");
-		const rating = new RatingLikesDislikes(fromHumanNumber(upVotes?.text), fromHumanNumber(downVotes?.text));		
-
-		//doc.dispose();
-
-		return new PlatformVideoDetails({
-			id: new PlatformID(PLATFORM, id, config.id),
-			name: videoDetail.title ?? "",
-			thumbnails: new Thumbnails(thumbnails),
-			author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id, PLATFORM_CLAIMTYPE), 
-				videoDetail.author.name ?? "", 
-				videoDetail.author.url,
-				authorThumbnailUrl ?? null),
-			datetime: dateToUnixTime(videoObject?.uploadDate),
-			duration: videoDetail.duration ?? -1,
-			viewCount: (userInteractionCount ? Number.parseInt(userInteractionCount) : 0),
-			url: url,
-			isLive: false,
-			description: videoObject?.description ?? "",
-			rating,
-			video: new VideoSourceDescriptor(sources)
-		});
+	if (res.code !== 200) {
+		return null;
 	}
 
-	return null;
+	const doc = domParser.parseFromString(res.body, "text/html");
+	const userImages = getUserImageList(res.body);
+
+	/** @type {Array} */		
+	let ldJson = null;
+	const scriptElements = doc.getElementsByTagName("script");
+
+	for (let i = 0; i < scriptElements.length; i++) {
+		if (scriptElements[i].getAttribute("type") === "application/ld+json") {
+			ldJson = JSON.parse(scriptElements[i].text);
+			break;
+		}
+	}
+
+	const vid = findVideoId(res.body);
+	const resTracks = http.GET(`${URL_VIDEO_DETAIL}${buildQuery({
+		request: "video",
+		ver: 2,
+		v: vid
+	})}`, {});
+
+	if (resTracks.code != 200) {
+		return null;
+	}
+
+	const videoDetail = JSON.parse(resTracks.body);
+	const sources = [];
+	for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
+		for (const [resolution, data] of Object.entries(resolutions)) {
+			sources.push(new VideoUrlSource({
+				name: `Original ${resolution}P`,
+				url: data.url,
+				width: data.meta.w,
+				height: data.meta.h,
+				bitrate: data.meta.bitrate,
+				duration: videoDetail.duration ?? -1,
+				container: `video/${containerName}`
+			}));
+		}
+	}
+
+	let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
+	const authorThumbnail = firstByClassOrNull(doc, "user-image");
+	const authorHref = firstByClassOrNull(doc, "media-by--a");
+	const authorId = getAuthorIdFromUrl(authorHref.getAttribute("href"));
+
+	const authorThumbnailUrl = userImages[getThumbnailId(authorThumbnail)];
+	const thumbnailUrl = videoObject?.thumbnailUrl;
+	const thumbnails = [];
+	if (thumbnailUrl) {
+		thumbnails.push(new Thumbnail(thumbnailUrl, 0));
+	}
+
+	const userInteractionCount = videoObject?.interactionStatistic?.userInteractionCount;
+	const id = getVideoIdFromUrl(url);
+	const upVotesMatch = /<span data-js="rumbles_up_votes">([^<]+)<\/span>/.exec(res.body);
+	const upVotes = upVotesMatch ? upVotesMatch[1] : null;
+	const downVotesMatch = /<span data-js="rumbles_down_votes">([^<]+)<\/span>/.exec(res.body);
+	const downVotes = downVotesMatch ? downVotesMatch[1] : null;
+	const rating = new RatingLikesDislikes(fromHumanNumber(upVotes) ?? 0, fromHumanNumber(downVotes) ?? 0);
+
+	//doc.dispose();
+
+	return new PlatformVideoDetails({
+		id: new PlatformID(PLATFORM, id, config.id),
+		name: videoDetail.title ?? "",
+		thumbnails: new Thumbnails(thumbnails),
+		author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id, PLATFORM_CLAIMTYPE), 
+			videoDetail.author.name ?? "", 
+			videoDetail.author.url,
+			authorThumbnailUrl ?? null),
+		datetime: dateToUnixTime(videoObject?.uploadDate),
+		duration: videoDetail.duration ?? -1,
+		viewCount: (userInteractionCount ? Number.parseInt(userInteractionCount) : 0),
+		url: url,
+		isLive: false,
+		description: videoObject?.description ?? "",
+		rating,
+		video: new VideoSourceDescriptor(sources)
+	});
 };
 
 source.getComments = function (url) {
