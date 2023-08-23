@@ -8,9 +8,9 @@ const URL_VIDEO_DETAIL = `${URL_BASE}/embedJS/u3/`;
 const URL_COMMENTS = "https://rumble.com/service.php?name=comment.list&video=";
 
 const REGEX_HUMAN_AGO = new RegExp("([0-9]*) ([a-zA-Z]*) ago");
-const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+) \{ background-image: url\("?([^"\)]+)"?\)/g;
+const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
 const REGEX_USER_IMAGE = /user-image--img--id-([0-9a-z]+)/;
-const REGEX_VIDEO_IMAGE_CSS = /.video-item--by-a--([0-9a-z]+)::before \{ background-image: url\("?([^"\)]+)"?\)/g;
+const REGEX_VIDEO_IMAGE_CSS = /.video-item--by-a--([0-9a-z]+)::before\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
 const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
 const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
 
@@ -199,9 +199,14 @@ source.getContentDetails = function(url) {
 	}
 
 	let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
-	const authorThumbnail = firstByClassOrNull(doc, "user-image");
 	const authorHref = firstByClassOrNull(doc, "media-by--a");
+	const authorThumbnail = firstByClassOrNull(authorHref, "user-image");
 	const authorId = getAuthorIdFromUrl(authorHref.getAttribute("href"));
+
+	console.log("authorHref", authorHref);
+	console.log("authorThumbnail", authorThumbnail);
+	console.log("authorId", authorId);
+	console.log("userImages", userImages);
 
 	const authorThumbnailUrl = userImages[getThumbnailId(authorThumbnail)];
 	const thumbnailUrl = videoObject?.thumbnailUrl;
