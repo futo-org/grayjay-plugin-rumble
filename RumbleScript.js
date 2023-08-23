@@ -203,11 +203,6 @@ source.getContentDetails = function(url) {
 	const authorThumbnail = firstByClassOrNull(authorHref, "user-image");
 	const authorId = getAuthorIdFromUrl(authorHref.getAttribute("href"));
 
-	console.log("authorHref", authorHref);
-	console.log("authorThumbnail", authorThumbnail);
-	console.log("authorId", authorId);
-	console.log("userImages", userImages);
-
 	const authorThumbnailUrl = userImages[getThumbnailId(authorThumbnail)];
 	const thumbnailUrl = videoObject?.thumbnailUrl;
 	const thumbnails = [];
