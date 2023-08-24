@@ -184,17 +184,31 @@ source.getContentDetails = function(url) {
 
 	const videoDetail = JSON.parse(resTracks.body);
 	const sources = [];
+	let isLive = false;
 	for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
-		for (const [resolution, data] of Object.entries(resolutions)) {
-			sources.push(new VideoUrlSource({
-				name: `Original ${resolution}P`,
-				url: data.url,
-				width: data.meta.w,
-				height: data.meta.h,
-				bitrate: data.meta.bitrate,
-				duration: videoDetail.duration ?? -1,
-				container: `video/${containerName}`
-			}));
+		if (containerName == "hls") {
+			for (const [resolution, data] of Object.entries(resolutions)) {
+				sources.push(new HLSSource({
+					name: `Stream ${resolution}`,
+					url: data.url
+				}));
+
+				if (data.meta.live) {
+					isLive = true;
+				}
+			}
+		} else {
+			for (const [resolution, data] of Object.entries(resolutions)) {
+				sources.push(new VideoUrlSource({
+					name: `Original ${resolution}P`,
+					url: data.url,
+					width: data.meta.w,
+					height: data.meta.h,
+					bitrate: data.meta.bitrate,
+					duration: videoDetail.duration ?? -1,
+					container: `video/${containerName}`
+				}));
+			}
 		}
 	}
 
@@ -232,7 +246,7 @@ source.getContentDetails = function(url) {
 		duration: videoDetail.duration ?? -1,
 		viewCount: (userInteractionCount ? Number.parseInt(userInteractionCount) : 0),
 		url: url,
-		isLive: false,
+		isLive: isLive,
 		description: videoObject?.description ?? "",
 		rating,
 		video: new VideoSourceDescriptor(sources)
@@ -518,6 +532,7 @@ function parseVideoListingEntry(authorImages, e) {
 	const title = firstByClassOrNull(e, "video-item--title");
 	const author = firstByClassOrNull(e, "video-item--by-a");
 	const views = firstByClassOrNull(e, "video-item--views");
+	const isLive = firstByClassOrNull(e, "video-item--live");
 
 	const thumbnails = [];
 	if (img) {
@@ -546,7 +561,7 @@ function parseVideoListingEntry(authorImages, e) {
 		duration: hhmmssToDuration(duration?.getAttribute("data-value")) ?? 0,
 		viewCount: fromHumanNumber(views?.textContent) ?? 0,
 		url: asAbsoluteURL(url),
-		isLive: false
+		isLive: isLive ? true : false
 	});
 }
 
