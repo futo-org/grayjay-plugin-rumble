@@ -186,6 +186,10 @@ source.getContentDetails = function(url) {
 	const sources = [];
 	let isLive = false;
 	for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
+		if (containerName == "timeline") {
+			continue;
+		}
+
 		if (containerName == "hls") {
 			for (const [resolution, data] of Object.entries(resolutions)) {
 				sources.push(new HLSSource({
