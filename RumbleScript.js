@@ -119,7 +119,7 @@ source.getChannel = function (url) {
 		const subscriberCount = subscribersText ? subscribersText.substring(0, subscribersText.length - " Followers".length) : null;
 
 		const channel = new PlatformChannel({
-			id: new PlatformID(PLATFORM, getAuthorIdFromUrl(url), config.id, PLATFORM_CLAIMTYPE),
+			id: getAuthorIdFromUrl(url),
 			name: title?.textContent ?? "",
 			thumbnail: img?.getAttribute("src"),
 			banner: banner?.getAttribute("src"),
@@ -142,7 +142,8 @@ source.getChannelTemplateByClaimMap = () => {
     return {
         //Rumble
         4: {
-            0: URL_BASE + "/{{CLAIMVALUE}}"
+			0: URL_BASE + "/user/{{CLAIMVALUE}}",
+			1: URL_BASE + "/c/{{CLAIMVALUE}}"
         }
     };
 };
@@ -219,7 +220,6 @@ source.getContentDetails = function(url) {
 	let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
 	const authorHref = firstByClassOrNull(doc, "media-by--a");
 	const authorThumbnail = firstByClassOrNull(authorHref, "user-image");
-	const authorId = getAuthorIdFromUrl(authorHref.getAttribute("href"));
 
 	const authorThumbnailUrl = userImages[getThumbnailId(authorThumbnail)];
 	const thumbnailUrl = videoObject?.thumbnailUrl;
@@ -242,7 +242,7 @@ source.getContentDetails = function(url) {
 		id: new PlatformID(PLATFORM, id, config.id),
 		name: videoDetail.title ?? "",
 		thumbnails: new Thumbnails(thumbnails),
-		author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id, PLATFORM_CLAIMTYPE), 
+		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref.getAttribute("href")), 
 			videoDetail.author.name ?? "", 
 			videoDetail.author.url,
 			authorThumbnailUrl ?? null),
@@ -292,7 +292,6 @@ source.getComments = function (url) {
 				}
 
 				const author = firstByClassOrNull(e, "comments-meta-author");
-				const authorId = getAuthorIdFromUrl(authorHref);
 				const time = firstByClassOrNull(e, "comments-meta-post-time");
 				const text = firstByClassOrNull(e, "comment-text");
 				const thumbnail = firstByClassOrNull(e, "user-image--img");
@@ -314,7 +313,7 @@ source.getComments = function (url) {
 
 				const c = new RumbleComment({
 					contextUrl: url,
-					author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id, PLATFORM_CLAIMTYPE),
+					author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref),
 						author.textContent ?? "",
 						asAbsoluteURL(author?.getAttribute("href")),
 						asAbsoluteURL(authorThumbnailUrl) ?? ""),
@@ -452,7 +451,7 @@ function getVideoIdFromUrl(url) {
  */
 function getAuthorIdFromUrl(url) {
 	if (!url) {
-		return null;
+		return new PlatformID(PLATFORM, null, config.id, PLATFORM_CLAIMTYPE);
 	}
 
 	if (url.startsWith('https://rumble.com')) {
@@ -460,18 +459,18 @@ function getAuthorIdFromUrl(url) {
 	}
 
 	if (url.startsWith('http://rumble.com')) {
-		url = url.substring('https://rumble.com'.length);
+		url = url.substring('http://rumble.com'.length);
 	}
 
 	if (url.startsWith('/user/')) {
-		return url.substring(1);
+		return new PlatformID(PLATFORM, url.substring('/user/'.length), config.id, PLATFORM_CLAIMTYPE, 0);
 	}
 
 	if (url.startsWith('/c/')) {
-		return url.substring(1);
+		return new PlatformID(PLATFORM, url.substring('/c/'.length), config.id, PLATFORM_CLAIMTYPE, 1);
 	}
 
-	return null;
+	return new PlatformID(PLATFORM, null, config.id, PLATFORM_CLAIMTYPE);
 }
 
 /**
@@ -548,7 +547,6 @@ function parseVideoListingEntry(authorImages, e) {
 
 	const authorHref = author?.getAttribute("href");
 	const authorThumbnailUrl = authorImages[getAuthorThumbnailId(author)];
-	const authorId = getAuthorIdFromUrl(authorHref);
 
 	const url = a?.getAttribute("href");
 	const id = getVideoIdFromUrl(url);
@@ -557,7 +555,7 @@ function parseVideoListingEntry(authorImages, e) {
 		id: new PlatformID(PLATFORM, id, config.id),
 		name: title?.textContent ?? "",
 		thumbnails: new Thumbnails(thumbnails),
-		author: new PlatformAuthorLink(new PlatformID(PLATFORM, authorId, config.id, PLATFORM_CLAIMTYPE), 
+		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref), 
 			author?.textContent, 
 			asAbsoluteURL(authorHref),
 			asAbsoluteURL(authorThumbnailUrl) ?? ""),
