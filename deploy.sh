@@ -7,7 +7,7 @@ touch $DOCUMENT_ROOT/maintenance.file
 
 # Swap over the content
 echo "Deploying content..."
-mkdir -p Rumble
+mkdir -p $DOCUMENT_ROOT/Rumble
 cp rumble.png $DOCUMENT_ROOT/Rumble
 cp RumbleConfig.json $DOCUMENT_ROOT/Rumble
 cp RumbleScript.js $DOCUMENT_ROOT/Rumble
