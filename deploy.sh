@@ -7,9 +7,10 @@ touch $DOCUMENT_ROOT/maintenance.file
 
 # Swap over the content
 echo "Deploying content..."
-cp rumble.png $DOCUMENT_ROOT/
-cp RumbleConfig.json $DOCUMENT_ROOT/
-cp RumbleScript.js $DOCUMENT_ROOT/
+mkdir -p Rumble
+cp rumble.png $DOCUMENT_ROOT/Rumble
+cp RumbleConfig.json $DOCUMENT_ROOT/Rumble
+cp RumbleScript.js $DOCUMENT_ROOT/Rumble
 
 # Notify Cloudflare to wipe the CDN cache
 echo "Purging Cloudflare cache..."
