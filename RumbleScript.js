@@ -185,7 +185,9 @@ source.getContentDetails = function(url) {
 
 	const videoDetail = JSON.parse(resTracks.body);
 	const sources = [];
-	let isLive = false;
+	const liveHeaderInfo = doc.getElementsByClassName("video-header-live-info");
+	let isLive = liveHeaderInfo.length > 0 && liveHeaderInfo[0].getElementsByClassName("live-video-status").length > 0;
+	let liveStream = null;
 	for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
 		if (containerName == "timeline") {
 			continue;
@@ -193,13 +195,14 @@ source.getContentDetails = function(url) {
 
 		if (containerName == "hls") {
 			for (const [resolution, data] of Object.entries(resolutions)) {
-				sources.push(new HLSSource({
+				const stream = new HLSSource({
 					name: `Stream ${resolution}`,
 					url: data.url
-				}));
+				});
 
-				if (data.meta.live) {
-					isLive = true;
+				sources.push(stream);
+				if (data.meta.live && isLive) {
+					liveStream = stream;
 				}
 			}
 		} else {
@@ -253,10 +256,21 @@ source.getContentDetails = function(url) {
 		isLive: isLive,
 		description: videoObject?.description ?? "",
 		rating,
-		video: new VideoSourceDescriptor(sources)
+		video: new VideoSourceDescriptor(sources),
+		live: liveStream
 	});
 };
+source.getLiveChatWindow = function(url) {
+	const res = http.GET(url, {});
+	if (res.isOk) {
+		const vid = findVideoIdInteger(res.body);
 
+		return {
+			url: "https://rumble.com/chat/popup/" + vid,
+			removeElements: [ ".chat--header" ]
+		};
+	}
+};
 source.getComments = function (url) {
 	if (!bridge.isLoggedIn()) {
 		return new CommentPager([], false, {});
@@ -624,6 +638,16 @@ function getVideosPager(url, params) {
  */
 function findVideoId(text) {
 	const vidMatch = text.match(/Rumble\(.*?\"video\":\"(.*?)\"/);
+	const vid = vidMatch ? vidMatch[1] : null;
+	return vid;
+}
+
+/**
+ * Find the video id integer in a block of text.
+ * @param {String} text
+ */
+function findVideoIdInteger(text) {
+	const vidMatch = text.match(/video_id:\s(.*?),/);
 	const vid = vidMatch ? vidMatch[1] : null;
 	return vid;
 }
