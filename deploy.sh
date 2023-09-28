@@ -11,6 +11,7 @@ mkdir -p $DOCUMENT_ROOT/Rumble
 cp rumble.png $DOCUMENT_ROOT/Rumble
 cp RumbleConfig.json $DOCUMENT_ROOT/Rumble
 cp RumbleScript.js $DOCUMENT_ROOT/Rumble
+sh sign.sh $DOCUMENT_ROOT/Rumble/RumbleScript.js $DOCUMENT_ROOT/Rumble/RumbleConfig.json
 
 # Notify Cloudflare to wipe the CDN cache
 echo "Purging Cloudflare cache for zone $CLOUDFLARE_ZONE_ID..."
