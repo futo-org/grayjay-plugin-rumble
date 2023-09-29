@@ -6,6 +6,7 @@ const URL_BASE_CHANNEL_ALT = `${URL_BASE}/user/`;
 const URL_BASE_VIDEO = `${URL_BASE}/v`;
 const URL_VIDEO_DETAIL = `${URL_BASE}/embedJS/u3/`;
 const URL_COMMENTS = "https://rumble.com/service.php?name=comment.list&video=";
+const URL_SEARCH_CHANNEL = `${URL_BASE}/search/channel?q=`;
 
 const REGEX_HUMAN_AGO = new RegExp("([0-9]*) ([a-zA-Z]*) ago");
 const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
@@ -99,6 +100,45 @@ source.search = function (query, type, order, filters) {
 		duration: duration,
 		license: license
 	});
+};
+source.searchChannels = function (query) {
+	const res = http.GET(URL_SEARCH_CHANNEL + query, {});
+	if (!res.isOk) {
+		return [];
+	}
+
+	const userImages = getUserImageList(res.body);
+	const doc = domParser.parseFromString(res.body, "text/html");
+	const elements = doc.getElementsByClassName("video-listing-entry");
+	const results = [];
+	for (let i = 0; i < elements.length; i++) {
+		const e = elements[i];
+		const a = firstByClassOrNull(e, "channel-item--a");
+		const img = firstByClassOrNull(e, "user-image--img");
+		const title = firstByClassOrNull(e, "channel-item--title");
+		let subscribers = firstByClassOrNull(e, "channel-item--subscribers");
+		if (subscribers) {
+			subscribers = subscribers.textContent
+			if (subscribers) {
+				subscribers = subscribers.replaceAll(".", "").replaceAll(",", "")
+				subscribers = parseInt(subscribers.split(' ')[0])
+			}
+		}
+
+		const url = a?.getAttribute("href");
+		const thumbnailUrl = userImages[getThumbnailId(img)];
+		const id = getAuthorIdFromUrl(url);
+		const authorLink = new PlatformAuthorLink(
+			id,
+			title?.textContent ?? "",
+			asAbsoluteURL(url),
+			asAbsoluteURL(thumbnailUrl),
+			subscribers
+		);
+
+		results.push(authorLink);
+	}
+    return new RumbleChannelPager(results);
 };
 
 //Channel
@@ -847,6 +887,16 @@ class RumbleComment extends Comment {
 
 	getReplies() {
 		return new RumbleCommentPager(this.replies.slice(10), 20);
+	}
+}
+
+class RumbleChannelPager extends ChannelPager {
+	constructor(results) {
+		super(results, false);
+	}
+
+	nextPage() {
+		return this;
 	}
 }
 
