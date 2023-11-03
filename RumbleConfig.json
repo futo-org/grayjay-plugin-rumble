@@ -3,11 +3,12 @@
 	"description": "A plugin that adds Rumble as a source",
 	"author": "FUTO",
 	"authorUrl": "https://futo.org",
-	
+
+	"platformUrl": "https://rumble.com",
 	"sourceUrl": "https://plugins.grayjay.app/Rumble/RumbleConfig.json",
 	"repositoryUrl": "https://futo.org",
 	"scriptUrl": "./RumbleScript.js",
-	"version": 36,
+	"version": 37,
 	"iconUrl": "./rumble.png",
 	"id": "2ce7b35e-d2b2-4adb-a728-a34a30d30359",
 
