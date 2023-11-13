@@ -402,7 +402,7 @@ source.getUserSubscriptions = function() {
 		return [];
 	}
 	
-	const res = http.GET("https://rumble.com/account/channel/subscriptions", {});
+	const res = http.GET("https://rumble.com/account/channel/subscriptions", {}, true);
 	if (res.code != 200) {
 		bridge.log("Failed to retrieve subscriptions page.");
 		return [];
@@ -410,7 +410,8 @@ source.getUserSubscriptions = function() {
 
 	const channelUrls = [];	
 	const doc = domParser.parseFromString(res.body, "text/html");
-	const aElements = doc.getElementsByTagName("a");
+	const tables = doc.getElementsByTagName("table");
+	const aElements = tables[0].getElementsByTagName("a");
 	bridge.log(aElements.length.toString() + " elements found");
 
 	for (let i = 0; i < aElements.length; i++) {
