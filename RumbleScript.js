@@ -447,8 +447,8 @@ class RumbleCommentPager extends CommentPager {
 	}
 
 	nextPage() {
-		const end = Math.min(offset + this.pageSize, this.allResults.length);
-		this.results = this.allResults.slice(offset, end - this.offset);
+		const end = Math.min(this.offset + this.pageSize, this.allResults.length);
+		this.results = this.allResults.slice(this.offset, end - this.offset);
 		this.offset = end;
 		this.hasMore = this.offset + this.pageSize < this.allResults.length;
 		return this;
