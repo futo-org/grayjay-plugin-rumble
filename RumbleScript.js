@@ -388,7 +388,7 @@ source.getComments = function (url) {
 		}
 	}
 	
-	return new RumbleCommentPager(comments.slice(0, 10), 20);
+	return new RumbleCommentPager(comments, 20);
 }
 
 source.getUserSubscriptions = function() {
