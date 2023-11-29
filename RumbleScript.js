@@ -147,32 +147,31 @@ source.isChannelUrl = function(url) {
 };
 source.getChannel = function (url) {
 	const res = http.GET(url, {});
-
-	if (res.code == 200) {
-		const prefix = url.startsWith(URL_BASE_CHANNEL) ? "channel" : "listing";
-		const doc = domParser.parseFromString(res.body, "text/html");
-		const title = firstByTagOrNull(firstByClassOrNull(doc, `${prefix}-header--title`), "h1");
-		const img = firstByClassOrNull(doc, `${prefix}-header--thumb`);
-		const banner = firstByClassOrNull(doc, `${prefix}-header--backsplash-img`);
-		const subscribers = firstByClassOrNull(doc, `${prefix}-header--followers`);
-		const subscribersText = subscribers?.textContent;
-		const subscriberCount = subscribersText ? subscribersText.substring(0, subscribersText.length - " Followers".length) : null;
-
-		const channel = new PlatformChannel({
-			id: getAuthorIdFromUrl(url),
-			name: title?.textContent ?? "",
-			thumbnail: img?.getAttribute("src"),
-			banner: banner?.getAttribute("src"),
-			subscribers: fromHumanNumber(subscriberCount) ?? 0,
-			description: "",
-			url: url,
-			links: {}
-		});
-		//doc.dispose();
-		return channel;
+	if (!res.isOk) {
+		throw new ScriptException(`Failed to get channel (${res.status}).`);
 	}
 
-	return null;
+	const prefix = url.startsWith(URL_BASE_CHANNEL) ? "channel" : "listing";
+	const doc = domParser.parseFromString(res.body, "text/html");
+	const title = firstByTagOrNull(firstByClassOrNull(doc, `${prefix}-header--title`), "h1");
+	const img = firstByClassOrNull(doc, `${prefix}-header--thumb`);
+	const banner = firstByClassOrNull(doc, `${prefix}-header--backsplash-img`);
+	const subscribers = firstByClassOrNull(doc, `${prefix}-header--followers`);
+	const subscribersText = subscribers?.textContent;
+	const subscriberCount = subscribersText ? subscribersText.substring(0, subscribersText.length - " Followers".length) : null;
+
+	const channel = new PlatformChannel({
+		id: getAuthorIdFromUrl(url),
+		name: title?.textContent ?? "",
+		thumbnail: img?.getAttribute("src"),
+		banner: banner?.getAttribute("src"),
+		subscribers: fromHumanNumber(subscriberCount) ?? 0,
+		description: "",
+		url: url,
+		links: {}
+	});
+	//doc.dispose();
+	return channel;
 };
 source.getChannelContents = function (url) {
 	return getVideosPager(url, {});
@@ -313,23 +312,23 @@ source.getLiveChatWindow = function(url) {
 };
 source.getComments = function (url) {
 	if (!bridge.isLoggedIn()) {
-		return new CommentPager([], false, {});
+		throw new UnavailableException('Sign in to see comments')
 	}
-
+	
 	const comments = [];
 	const res = http.GET(url, {});
-	let lastDepth = 0;
 	let lastCommentPerLevel = {};
-	if (res.code == 200) {
+	if (res.isOk) {
 		const vid = findVideoId(res.body).substring(1);		
 		const commentsRes = http.GET(URL_COMMENTS + vid, {}, true);
-		if (commentsRes.code == 200) {
+		if (commentsRes.isOk) {
+			console.log("TEST");
 			const obj = JSON.parse(commentsRes.body);
 
 			const userImages = getUserImageList(obj.css_libs.global);			
 			const doc = domParser.parseFromString(obj.html, "text/html");
 			const elements = doc.getElementsByClassName("comment-item");
-			for (let i = 0; i < elements.length && i < 200; i++) { //i<200 temporary constraint to avoid crash
+			for (let i = 0; i < elements.length; i++) {
 				/** @type {Element} */
 				const e = elements[i];
 
@@ -365,11 +364,12 @@ source.getComments = function (url) {
 					}
 				}
 
+				const authorHref = asAbsoluteURL(author?.getAttribute("href"));
 				const c = new RumbleComment({
 					contextUrl: url,
 					author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref),
 						author.textContent ?? "",
-						asAbsoluteURL(author?.getAttribute("href")),
+						asAbsoluteURL(authorHref),
 						asAbsoluteURL(authorThumbnailUrl) ?? ""),
 					message: text?.textContent ?? "",
 					date: extractAgoText_Timestamp(time?.textContent),
@@ -384,12 +384,7 @@ source.getComments = function (url) {
 				} else {
 					lastCommentPerLevel[depth - 1].replies.push(c);
 				}
-
-				lastDepth = depth;
-
-                //e.dispose();
 			}
-            //doc.dispose();
 		}
 	}
 	
