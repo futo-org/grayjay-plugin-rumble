@@ -882,7 +882,7 @@ class RumbleComment extends Comment {
 	}
 
 	getReplies() {
-		return new RumbleCommentPager(this.replies.slice(10), 20);
+		return new RumbleCommentPager(this.replies, 20);
 	}
 }
 
