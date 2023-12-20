@@ -160,10 +160,15 @@ source.getChannel = function (url) {
 	const subscribersText = subscribers?.textContent;
 	const subscriberCount = subscribersText ? subscribersText.substring(0, subscribersText.length - " Followers".length) : null;
 
+	let imageUrl = img?.getAttribute("src");
+	if (!imageUrl) {
+		imageUrl = firstByClassOrNull(doc, "channel-header--img")?.getAttribute("src");
+	}
+
 	const channel = new PlatformChannel({
 		id: getAuthorIdFromUrl(url),
 		name: title?.textContent ?? "",
-		thumbnail: img?.getAttribute("src"),
+		thumbnail: asAbsoluteURL(imageUrl),
 		banner: banner?.getAttribute("src"),
 		subscribers: fromHumanNumber(subscriberCount) ?? 0,
 		description: "",
@@ -174,7 +179,9 @@ source.getChannel = function (url) {
 	return channel;
 };
 source.getChannelContents = function (url) {
-	return getVideosPager(url, {});
+	//TODO: Pass in author from getChannelContents
+	const authorLink = new PlatformAuthorLink(getAuthorIdFromUrl(""), "", "", "");
+	return getVideosPager(url, {}, authorLink);
 };
 
 source.getChannelTemplateByClaimMap = () => {
@@ -310,11 +317,7 @@ source.getLiveChatWindow = function(url) {
 		};
 	}
 };
-source.getComments = function (url) {
-	if (!bridge.isLoggedIn()) {
-		throw new UnavailableException('Sign in to see comments')
-	}
-	
+source.getComments = function (url) {	
 	const comments = [];
 	const res = http.GET(url, {});
 	let lastCommentPerLevel = {};
@@ -322,11 +325,14 @@ source.getComments = function (url) {
 		const vid = findVideoId(res.body).substring(1);		
 		const commentsRes = http.GET(URL_COMMENTS + vid, {}, true);
 		if (commentsRes.isOk) {
-			console.log("TEST");
 			const obj = JSON.parse(commentsRes.body);
 
 			const userImages = getUserImageList(obj.css_libs.global);			
 			const doc = domParser.parseFromString(obj.html, "text/html");
+			if (doc.getElementById("sign-in-to-see-comments") && !bridge.isLoggedIn()) {
+				throw new UnavailableException('Sign in to see comments')
+			}
+
 			const elements = doc.getElementsByClassName("comment-item");
 			for (let i = 0; i < elements.length; i++) {
 				/** @type {Element} */
@@ -618,6 +624,59 @@ function parseVideoListingEntry(authorImages, e) {
 }
 
 /**
+ * Parse a HTML videostream element to a JSON element
+ * @param {Document} doc HTML doc
+ * @param {PlatformAuthorLink?} author The author of the video
+ * @returns {PlatformVideo} Platform video
+ */
+function parseVideoStream(e, author) {
+	const a = firstByClassOrNull(e, "title__link link");
+	const img = firstByClassOrNull(e, "thumbnail__image");
+	const duration = firstByClassOrNull(e, "videostream__status--duration");
+	const time = firstByClassOrNull(e, "videostream__time");
+	const title = firstByClassOrNull(e, "thumbnail__title");
+	const views = firstByClassOrNull(e, "videostream__views");
+	const isLive = firstByClassOrNull(e, "videostream__status--live");
+
+	const thumbnails = [];
+	if (img) {
+		const src = img.getAttribute("src");
+		if (src) {
+			thumbnails.push(new Thumbnail(src, 0));
+		}
+	}
+
+	if (!author) {
+		const channelImage = firstByClassOrNull(e, "channel__image");
+		const channelLink = firstByClassOrNull(e, "channel__link");
+		const authorHref = channelLink?.getAttribute("href");
+		const channelName = firstByClassOrNull(e, "channel__name");
+		const channelImageUrl = asAbsoluteURL(channelImage?.getAttribute("style")?.match(/url\((?:'|"|)(.*?)(?:'|"|)\)/i));
+		author = new PlatformAuthorLink(
+			getAuthorIdFromUrl(authorHref),
+			channelName?.textContent?.trim(),
+			asAbsoluteURL(authorHref),
+			channelImageUrl ?? ""
+		);
+	}
+
+	const url = a?.getAttribute("href");
+	const id = getVideoIdFromUrl(url);
+
+	return new PlatformVideo({
+		id: new PlatformID(PLATFORM, id, config.id),
+		name: title?.textContent ?? "",
+		thumbnails: new Thumbnails(thumbnails),
+		author: author,
+		uploadDate: dateToUnixTime(time?.getAttribute("datetime")),
+		duration: hhmmssToDuration(duration?.textContent?.trim()) ?? 0,
+		viewCount: Number.parseInt(views?.getAttribute("data-views")) ?? 0,
+		url: asAbsoluteURL(url),
+		isLive: isLive ? true : false
+	});
+}
+
+/**
  * Parse a HTML collection video-listing-entry element to a JSON element
  * @param {Map<String, String>} authorImages The images map
  * @param {Document} doc HTML doc
@@ -635,20 +694,48 @@ function parseVideoListingEntries(authorImages, elements) {
 }
 
 /**
+ * Parse a HTML collection video-listing-entry element to a JSON element
+ * @param {Document} doc HTML doc
+ * @param {HTMLCollectionOf<Element>} elements HTML elements to parse
+ * @param {PlatformAuthorLink?} author The author of the video
+ * @returns {PlatformVideo[]} Platform videos
+ */
+function parseVideoStreams(elements, author) {
+	const res = [];
+	for (let i = 0; i < elements.length; i++) {
+		const e = elements[i];
+		res.push(parseVideoStream(e, author));
+	}
+
+	return res;
+}
+
+/**
  * Retrieves the videos pager for a specific page
  * @param {String} url The base URL
  * @param {{[key: string]: any}} params Query parameters
  * @returns {RumbleVideoPager?} Videos pager
+ * @param {PlatformAuthorLink?} author The author of the video
  */
-function getVideosPager(url, params) {
+function getVideosPager(url, params, author) {
 	const res = http.GET(`${url}${buildQuery(params)}`, { "Cookie": `PNRC=${Math.floor(Math.random() * 312938162)}` });
 
 	if (res.code == 200) {
 		const doc = domParser.parseFromString(res.body, "text/html");
 
+		const results = [];
 		const authorImages = getAuthorImageList(res.body);
-		const elements = doc.getElementsByClassName("video-listing-entry");
-		const results = parseVideoListingEntries(authorImages, elements);
+		{
+			const elements = doc.getElementsByClassName("video-listing-entry");
+			const r = parseVideoListingEntries(authorImages, elements);
+			results.push(...r);
+		}
+
+		{
+			const elements = doc.getElementsByClassName("videostream");
+			const r = parseVideoStreams(elements, author);
+			results.push(...r);
+		}
 
 		const page = params.page ?? 1;
 		let hasMore = false;
@@ -661,6 +748,7 @@ function getVideosPager(url, params) {
 				break;
 			}
 		}
+
         //doc.dispose();
 		return new RumbleVideoPager(results, hasMore, url, params);
 	}
