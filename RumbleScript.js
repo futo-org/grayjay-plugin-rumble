@@ -179,8 +179,8 @@ source.getChannel = function (url) {
 	return channel;
 };
 source.getChannelContents = function (url) {
-	//TODO: Pass in author from getChannelContents
-	const authorLink = new PlatformAuthorLink(getAuthorIdFromUrl(""), "", "", "");
+	const author = source.getChannel(url);
+	const authorLink = new PlatformAuthorLink(author.id, author.name, author.url, author.thumbnail);
 	return getVideosPager(url, {}, authorLink);
 };
 
