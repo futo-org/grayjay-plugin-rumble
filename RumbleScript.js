@@ -232,7 +232,7 @@ source.getContentDetails = function(url) {
 	const videoDetail = JSON.parse(resTracks.body);
 	const sources = [];
 	const liveHeaderInfo = doc.getElementsByClassName("video-header-live-info");
-	let isLive = liveHeaderInfo.length > 0 && liveHeaderInfo[0].getElementsByClassName("live-video-status").length > 0;
+	let isLive = liveHeaderInfo.length > 0 && liveHeaderInfo[0].getElementsByClassName("live-video-view-count-status").length > 0;
 	let liveStream = null;
 	for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
 		if (containerName == "timeline") {
@@ -986,4 +986,4 @@ class RumbleChannelPager extends ChannelPager {
 
 //#endregion
 
-log("LOADED");
+console.log("LOADED");
