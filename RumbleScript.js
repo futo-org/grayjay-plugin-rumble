@@ -101,24 +101,52 @@ source.search = function (query, type, order, filters) {
 		license: license
 	});
 };
-source.searchChannels = function (query) {
-	const res = http.GET(URL_SEARCH_CHANNEL + query, {});
+
+function getChannelsPage(query, page = null) {
+	const url = URL_SEARCH_CHANNEL + query + (page ? `&page=${page}` : "");
+	const res = http.GET(url, {});
 	if (!res.isOk) {
 		return [];
 	}
 
 	const userImages = getUserImageList(res.body);
 	const doc = domParser.parseFromString(res.body, "text/html");
-	const elements = doc.getElementsByClassName("video-listing-entry");
+	let mainAndSidebar = doc.getElementsByClassName("main-and-sidebar");
+	if (!mainAndSidebar || mainAndSidebar.length < 1 || !mainAndSidebar[0]) {
+		return;
+	}
+	mainAndSidebar = mainAndSidebar[0];
+
+	let div = null;
+	for (let i = 0; i < mainAndSidebar.childNodes.length; i++) {
+		const child = mainAndSidebar.childNodes[i];
+		const tagName = child.tagName;
+		if (tagName === "DIV") {
+			div = child;
+			break;
+		}
+	}
+	
+	if (!div) {
+		return;
+	}
+
+	const elements = div.childNodes;
 	const results = [];
+	let articleIndex = 0;
 	for (let i = 0; i < elements.length; i++) {
 		const e = elements[i];
-		const a = firstByClassOrNull(e, "channel-item--a");
-		const img = firstByClassOrNull(e, "user-image--img");
-		const title = firstByClassOrNull(e, "channel-item--title");
-		let subscribers = firstByClassOrNull(e, "channel-item--subscribers");
+		if (e.tagName !== "ARTICLE")
+			continue;
+
+		const a = e.querySelector("a[href]");
+		const img = e.querySelector("i[data-js='user-image']");
+		const h3Element = e.querySelector("h3");
+		const title = h3Element?.querySelector("span");
+		const spans = h3Element?.parentElement.querySelectorAll("span");
+		let subscribers = spans?.[spans.length - 1];		
 		if (subscribers) {
-			subscribers = subscribers.textContent
+			subscribers = subscribers.textContent.trim();
 			if (subscribers) {
 				subscribers = subscribers.replaceAll(".", "").replaceAll(",", "")
 				subscribers = parseInt(subscribers.split(' ')[0])
@@ -126,7 +154,8 @@ source.searchChannels = function (query) {
 		}
 
 		const url = a?.getAttribute("href");
-		const thumbnailUrl = userImages[getThumbnailId(img)];
+		const thumbnailId = articleIndex;
+		const thumbnailUrl = userImages[thumbnailId];
 		const id = getAuthorIdFromUrl(url);
 		const authorLink = new PlatformAuthorLink(
 			id,
@@ -137,8 +166,14 @@ source.searchChannels = function (query) {
 		);
 
 		results.push(authorLink);
+		articleIndex++;
 	}
-    return new RumbleChannelPager(results);
+	const hasMoreQuery = `a[href='/search/channel?q=${query}&page=${(page ?? 1) + 1}']`;
+    return { results, hasMore: doc.querySelector(hasMoreQuery) ? true : false };
+}
+
+source.searchChannels = function (query) {
+	return new RumbleChannelPager({ ... getChannelsPage(query), page: 1, query });
 };
 
 //Channel
@@ -975,11 +1010,17 @@ class RumbleComment extends Comment {
 }
 
 class RumbleChannelPager extends ChannelPager {
-	constructor(results) {
-		super(results, false);
+	constructor({ results, query, page, hasMore }) {
+		super(results, hasMore);
+		this.query = query;
+		this.page = page;
 	}
 
 	nextPage() {
+		this.page = this.page + 1;
+		const res = getChannelsPage(this.query, this.page);
+		this.results = res.results;
+		this.hasMore = res.hasMore;
 		return this;
 	}
 }
