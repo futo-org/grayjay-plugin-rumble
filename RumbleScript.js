@@ -21,7 +21,7 @@ const PLATFORM_CLAIMTYPE = 4;
 var config = {};
 
 //Source Methods
-source.enable = function(conf){
+source.enable = function (conf) {
 	config = conf ?? {};
 	log(config);
 }
@@ -33,7 +33,7 @@ source.getHome = function () {
 	});
 };
 
-source.searchSuggestions = function(query) {
+source.searchSuggestions = function (query) {
 	return [];
 };
 source.getSearchCapabilities = () => {
@@ -126,7 +126,7 @@ function getChannelsPage(query, page = null) {
 			break;
 		}
 	}
-	
+
 	if (!div) {
 		return;
 	}
@@ -144,7 +144,7 @@ function getChannelsPage(query, page = null) {
 		const h3Element = e.querySelector("h3");
 		const title = h3Element?.querySelector("span");
 		const spans = h3Element?.parentElement.querySelectorAll("span");
-		let subscribers = spans?.[spans.length - 1];		
+		let subscribers = spans?.[spans.length - 1];
 		if (subscribers) {
 			subscribers = subscribers.textContent.trim();
 			if (subscribers) {
@@ -169,15 +169,15 @@ function getChannelsPage(query, page = null) {
 		articleIndex++;
 	}
 	const hasMoreQuery = `a[href='/search/channel?q=${query}&page=${(page ?? 1) + 1}']`;
-    return { results, hasMore: doc.querySelector(hasMoreQuery) ? true : false };
+	return { results, hasMore: doc.querySelector(hasMoreQuery) ? true : false };
 }
 
 source.searchChannels = function (query) {
-	return new RumbleChannelPager({ ... getChannelsPage(query), page: 1, query });
+	return new RumbleChannelPager({ ...getChannelsPage(query), page: 1, query });
 };
 
 //Channel
-source.isChannelUrl = function(url) {
+source.isChannelUrl = function (url) {
 	return url.startsWith(URL_BASE_CHANNEL) || url.startsWith(URL_BASE_CHANNEL_ALT);
 };
 source.getChannel = function (url) {
@@ -220,20 +220,20 @@ source.getChannelContents = function (url) {
 };
 
 source.getChannelTemplateByClaimMap = () => {
-    return {
-        //Rumble
-        4: {
+	return {
+		//Rumble
+		4: {
 			0: URL_BASE + "/user/{{CLAIMVALUE}}",
 			1: URL_BASE + "/c/{{CLAIMVALUE}}"
-        }
-    };
+		}
+	};
 };
 
 //Video
-source.isContentDetailsUrl = function(url) {
+source.isContentDetailsUrl = function (url) {
 	return url.startsWith(URL_BASE_VIDEO);
 };
-source.getContentDetails = function(url) {
+source.getContentDetails = function (url) {
 	const res = http.GET(url, {});
 	if (res.code !== 200) {
 		return null;
@@ -242,7 +242,20 @@ source.getContentDetails = function(url) {
 	const doc = domParser.parseFromString(res.body, "text/html");
 	const userImages = getUserImageList(res.body);
 
-	/** @type {Array} */		
+	let description = ""
+	const description_child_nodes = doc.querySelector(`[data-js="media_long_description_container"]`).childNodes
+
+	for (const [index, node] of description_child_nodes.entries()) {
+		if (node.nodeType === "p") {
+			description += node.innerHTML
+			if (index !== description_child_nodes.length - 1) {
+				description += "\n"
+				description += "\n"
+			}
+		}
+	}
+
+	/** @type {Array} */
 	let ldJson = null;
 	const scriptElements = doc.getElementsByTagName("script");
 
@@ -326,43 +339,43 @@ source.getContentDetails = function(url) {
 		id: new PlatformID(PLATFORM, id, config.id),
 		name: videoDetail.title ?? "",
 		thumbnails: new Thumbnails(thumbnails),
-		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref.getAttribute("href")), 
-			videoDetail.author.name ?? "", 
+		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref.getAttribute("href")),
+			videoDetail.author.name ?? "",
 			videoDetail.author.url,
 			authorThumbnailUrl ?? null),
 		datetime: dateToUnixTime(videoObject?.uploadDate),
 		duration: videoDetail.duration ?? -1,
 		viewCount: (userInteractionCount ? Number.parseInt(userInteractionCount) : 0),
-		url: url,
-		isLive: isLive,
-		description: videoObject?.description ?? "",
+		url,
+		isLive,
+		description,
 		rating,
 		video: new VideoSourceDescriptor(sources),
 		live: liveStream
 	});
 };
-source.getLiveChatWindow = function(url) {
+source.getLiveChatWindow = function (url) {
 	const res = http.GET(url, {});
 	if (res.isOk) {
 		const vid = findVideoIdInteger(res.body);
 
 		return {
 			url: "https://rumble.com/chat/popup/" + vid,
-			removeElements: [ ".chat--header" ]
+			removeElements: [".chat--header"]
 		};
 	}
 };
-source.getComments = function (url) {	
+source.getComments = function (url) {
 	const comments = [];
 	const res = http.GET(url, {});
 	let lastCommentPerLevel = {};
 	if (res.isOk) {
-		const vid = findVideoId(res.body).substring(1);		
+		const vid = findVideoId(res.body).substring(1);
 		const commentsRes = http.GET(URL_COMMENTS + vid, {}, true);
 		if (commentsRes.isOk) {
 			const obj = JSON.parse(commentsRes.body);
 
-			const userImages = getUserImageList(obj.css_libs.global);			
+			const userImages = getUserImageList(obj.css_libs.global);
 			const doc = domParser.parseFromString(obj.html, "text/html");
 			if (doc.getElementById("sign-in-to-see-comments") && !bridge.isLoggedIn()) {
 				throw new UnavailableException('Sign in to see comments')
@@ -380,7 +393,7 @@ source.getComments = function (url) {
 						break;
 					}
 				}
-				
+
 				if (isCreate) {
 					continue;
 				}
@@ -389,6 +402,7 @@ source.getComments = function (url) {
 				const time = firstByClassOrNull(e, "comments-meta-post-time");
 				const text = firstByClassOrNull(e, "comment-text");
 				const thumbnail = firstByClassOrNull(e, "user-image--img");
+				const like_count = parseInt(firstByClassOrNull(e, "rumbles-count").textContent)
 
 				const authorThumbnailUrl = userImages[getThumbnailId(thumbnail)];
 				const replyCount = e.getAttribute("data-num-replies");
@@ -415,7 +429,8 @@ source.getComments = function (url) {
 					message: text?.textContent ?? "",
 					date: extractAgoText_Timestamp(time?.textContent),
 					replyCount: replyCount != null ? parseInt(replyCount) : 0,
-					replies: []
+					replies: [],
+					rating: new RatingLikes(like_count)
 				});
 
 				lastCommentPerLevel[depth] = c;
@@ -428,23 +443,23 @@ source.getComments = function (url) {
 			}
 		}
 	}
-	
+
 	return new RumbleCommentPager(comments, 20);
 }
 
-source.getUserSubscriptions = function() {
+source.getUserSubscriptions = function () {
 	if (!bridge.isLoggedIn()) {
 		bridge.log("Failed to retrieve subscriptions page because not logged in.");
 		return [];
 	}
-	
+
 	const res = http.GET("https://rumble.com/account/channel/subscriptions", {}, true);
 	if (res.code != 200) {
 		bridge.log("Failed to retrieve subscriptions page.");
 		return [];
 	}
 
-	const channelUrls = [];	
+	const channelUrls = [];
 	const doc = domParser.parseFromString(res.body, "text/html");
 	const tables = doc.getElementsByTagName("table");
 	const aElements = tables[0].getElementsByTagName("a");
@@ -468,7 +483,7 @@ class RumbleVideoPager extends VideoPager {
 	constructor(results, hasMore, url, params) {
 		super(results, hasMore, { url, params });
 	}
-	
+
 	nextPage() {
 		const newParams = { ... this.context.params, page: (this.context.params.page ?? 1) + 1 };
 		return getVideosPager(this.context.url, newParams);
@@ -646,8 +661,8 @@ function parseVideoListingEntry(authorImages, e) {
 		id: new PlatformID(PLATFORM, id, config.id),
 		name: title?.textContent ?? "",
 		thumbnails: new Thumbnails(thumbnails),
-		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref), 
-			author?.textContent, 
+		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref),
+			author?.textContent,
 			asAbsoluteURL(authorHref),
 			asAbsoluteURL(authorThumbnailUrl) ?? ""),
 		uploadDate: dateToUnixTime(time?.getAttribute("datetime")),
@@ -784,7 +799,7 @@ function getVideosPager(url, params, author) {
 			}
 		}
 
-        //doc.dispose();
+		//doc.dispose();
 		return new RumbleVideoPager(results, hasMore, url, params);
 	}
 
@@ -901,7 +916,7 @@ function buildQuery(params) {
 		}
 	}
 
-	return (query && query.length > 0) ? `?${query}` : ""; 
+	return (query && query.length > 0) ? `?${query}` : "";
 }
 
 /**
@@ -917,7 +932,7 @@ function asAbsoluteURL(url) {
 	if (url.startsWith('/')) {
 		return `${URL_BASE}${url}`;
 	}
-	
+
 	return url;
 }
 
@@ -967,11 +982,11 @@ function extractAgoText_Timestamp(str) {
 	}
 
 	const match = str.match(REGEX_HUMAN_AGO);
-	if(!match)
+	if (!match)
 		return 0;
 	const value = parseInt(match[1]);
 	const now = parseInt(new Date().getTime() / 1000);
-	switch(match[2]) {
+	switch (match[2]) {
 		case "second":
 		case "seconds":
 			return now - value;
@@ -1019,6 +1034,15 @@ class RumbleChannelPager extends ChannelPager {
 	nextPage() {
 		this.page = this.page + 1;
 		const res = getChannelsPage(this.query, this.page);
+
+		// for some reason Rumble will sometimes have empty search pages where
+		// it says there are more results but there actually are not more results
+		if (res === undefined) {
+			this.results = []
+			this.hasMore = false
+			return this
+		}
+
 		this.results = res.results;
 		this.hasMore = res.hasMore;
 		return this;
