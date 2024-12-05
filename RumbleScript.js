@@ -242,19 +242,6 @@ source.getContentDetails = function (url) {
 	const doc = domParser.parseFromString(res.body, "text/html");
 	const userImages = getUserImageList(res.body);
 
-	let description = ""
-	const description_child_nodes = doc.querySelector(`[data-js="media_long_description_container"]`).childNodes
-
-	for (const [index, node] of description_child_nodes.entries()) {
-		if (node.nodeType === "p") {
-			description += node.innerHTML
-			if (index !== description_child_nodes.length - 1) {
-				description += "\n"
-				description += "\n"
-			}
-		}
-	}
-
 	/** @type {Array} */
 	let ldJson = null;
 	const scriptElements = doc.getElementsByTagName("script");
@@ -332,6 +319,21 @@ source.getContentDetails = function (url) {
 	const downVotesMatch = /<span data-js="rumbles_down_votes">([^<]+)<\/span>/.exec(res.body);
 	const downVotes = downVotesMatch ? downVotesMatch[1] : null;
 	const rating = new RatingLikesDislikes(fromHumanNumber(upVotes) ?? 0, fromHumanNumber(downVotes) ?? 0);
+
+	let description = ""
+	if (videoObject.description !== "") {
+		const description_child_nodes = doc.querySelector(`[data-js="media_long_description_container"]`).childNodes
+
+		for (const [index, node] of description_child_nodes.entries()) {
+			if (node.nodeType === "p") {
+				description += node.innerHTML
+				if (index !== description_child_nodes.length - 1) {
+					description += "\n"
+					description += "\n"
+				}
+			}
+		}
+	}
 
 	//doc.dispose();
 
