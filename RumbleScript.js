@@ -186,7 +186,7 @@ source.getChannel = function (url) {
 		throw new ScriptException(`Failed to get channel (${res.status}).`);
 	}
 
-	const prefix = url.startsWith(URL_BASE_CHANNEL) ? "channel" : "listing";
+	const prefix = "channel"
 	const doc = domParser.parseFromString(res.body, "text/html");
 	const title = firstByTagOrNull(firstByClassOrNull(doc, `${prefix}-header--title`), "h1");
 	const img = firstByClassOrNull(doc, `${prefix}-header--thumb`);
@@ -197,7 +197,7 @@ source.getChannel = function (url) {
 
 	let imageUrl = img?.getAttribute("src");
 	if (!imageUrl) {
-		imageUrl = firstByClassOrNull(doc, "channel-header--img")?.getAttribute("src");
+		imageUrl = firstByClassOrNull(doc, `${prefix}-header--img`)?.getAttribute("src");
 	}
 
 	const channel = new PlatformChannel({
