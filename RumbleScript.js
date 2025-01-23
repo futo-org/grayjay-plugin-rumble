@@ -14,6 +14,7 @@ const REGEX_USER_IMAGE = /user-image--img--id-([0-9a-z]+)/;
 const REGEX_VIDEO_IMAGE_CSS = /.video-item--by-a--([0-9a-z]+)::before\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
 const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
 const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
+const REGEX_VIDEO_INFO = /Rumble\("play", ({".*?),"api"/
 
 const PLATFORM = "Rumble";
 const PLATFORM_CLAIMTYPE = 4;
@@ -234,7 +235,7 @@ source.isContentDetailsUrl = function (url) {
 	return url.startsWith(URL_BASE_VIDEO);
 };
 source.getContentDetails = function (url) {
-	const res = http.GET(url, {});
+	const res = http.GET(url, {}, true)
 	if (res.code !== 200) {
 		return null;
 	}
@@ -253,12 +254,23 @@ source.getContentDetails = function (url) {
 		}
 	}
 
-	const vid = findVideoId(res.body);
+	const vidInfo = findVideoInfo(res.body)
+	const vid = vidInfo.video
+	if (vidInfo === null) {
+		if (bridge.isLoggedIn()) {
+			throw new LoginRequiredException("Subscribe to watch premium content")
+		} else {
+			throw new LoginRequiredException("Login to access premium content")
+		}
+	}
+	if (vidInfo.show_premium_exclusive_gate) {
+		bridge.toast("Contains premium exclusive section. Subscribe to watch premium content")
+	}
 	const resTracks = http.GET(`${URL_VIDEO_DETAIL}${buildQuery({
 		request: "video",
 		ver: 2,
 		v: vid
-	})}`, {});
+	})}`, {}, true);
 
 	if (resTracks.code != 200) {
 		return null;
@@ -282,7 +294,7 @@ source.getContentDetails = function (url) {
 				});
 
 				sources.push(stream);
-				if (data.meta.live && isLive) {
+				if (isLive && data.meta.live) {
 					liveStream = stream;
 				}
 			}
@@ -369,7 +381,7 @@ source.getLiveChatWindow = function (url) {
 };
 source.getComments = function (url) {
 	const comments = [];
-	const res = http.GET(url, {});
+	const res = http.GET(url, {}, true);
 	let lastCommentPerLevel = {};
 	if (res.isOk) {
 		const vid = findVideoId(res.body).substring(1);
@@ -809,13 +821,23 @@ function getVideosPager(url, params, author) {
 }
 
 /**
+ * Find the video info in a block of text.
+ * @param {String} text
+ */
+function findVideoInfo(text) {
+	const vidInfoMatch = text.match(REGEX_VIDEO_INFO)
+	const vidInfo = vidInfoMatch ? JSON.parse(vidInfoMatch[1] + "}") : null
+	return vidInfo
+}
+
+/**
  * Find the video id in a block of text.
  * @param {String} text
  */
 function findVideoId(text) {
-	const vidMatch = text.match(/Rumble\(.*?\"video\":\"(.*?)\"/);
-	const vid = vidMatch ? vidMatch[1] : null;
-	return vid;
+	const vidInfo = findVideoInfo(text)
+	const vid = vidInfo ? vidInfo.video : null
+	return vid
 }
 
 /**
