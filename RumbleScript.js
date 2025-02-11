@@ -7,6 +7,7 @@ const URL_BASE_VIDEO = `${URL_BASE}/v`;
 const URL_VIDEO_DETAIL = `${URL_BASE}/embedJS/u3/`;
 const URL_COMMENTS = "https://rumble.com/service.php?name=comment.list&video=";
 const URL_SEARCH_CHANNEL = `${URL_BASE}/search/channel?q=`;
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0';
 
 const REGEX_HUMAN_AGO = new RegExp("([0-9]*) ([a-zA-Z]*) ago");
 const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
@@ -20,6 +21,10 @@ const PLATFORM = "Rumble";
 const PLATFORM_CLAIMTYPE = 4;
 
 var config = {};
+
+const defaultHeaders = {
+	'User-Agent' : USER_AGENT
+}
 
 //Source Methods
 source.enable = function (conf) {
@@ -105,7 +110,7 @@ source.search = function (query, type, order, filters) {
 
 function getChannelsPage(query, page = null) {
 	const url = URL_SEARCH_CHANNEL + query + (page ? `&page=${page}` : "");
-	const res = http.GET(url, {});
+	const res = http.GET(url, defaultHeaders);
 	if (!res.isOk) {
 		return [];
 	}
@@ -182,7 +187,7 @@ source.isChannelUrl = function (url) {
 	return url.startsWith(URL_BASE_CHANNEL) || url.startsWith(URL_BASE_CHANNEL_ALT);
 };
 source.getChannel = function (url) {
-	const res = http.GET(url, {});
+	const res = http.GET(url, defaultHeaders);
 	if (!res.isOk) {
 		throw new ScriptException(`Failed to get channel (${res.status}).`);
 	}
@@ -192,9 +197,7 @@ source.getChannel = function (url) {
 	const title = firstByTagOrNull(firstByClassOrNull(doc, `${prefix}-header--title`), "h1");
 	const img = firstByClassOrNull(doc, `${prefix}-header--thumb`);
 	const banner = firstByClassOrNull(doc, `${prefix}-header--backsplash-img`);
-	const subscribers = firstByClassOrNull(doc, `${prefix}-header--followers`);
-	const subscribersText = subscribers?.textContent;
-	const subscriberCount = subscribersText ? subscribersText.substring(0, subscribersText.length - " Followers".length) : null;
+	const subscribersElement = doc.querySelector(`.${prefix}-header--title span`);
 
 	let imageUrl = img?.getAttribute("src");
 	if (!imageUrl) {
@@ -206,7 +209,7 @@ source.getChannel = function (url) {
 		name: title?.textContent ?? "",
 		thumbnail: asAbsoluteURL(imageUrl),
 		banner: banner?.getAttribute("src"),
-		subscribers: fromHumanNumber(subscriberCount) ?? 0,
+		subscribers: extractSubCount(subscribersElement),
 		description: "",
 		url: url,
 		links: {}
@@ -235,7 +238,7 @@ source.isContentDetailsUrl = function (url) {
 	return url.startsWith(URL_BASE_VIDEO);
 };
 source.getContentDetails = function (url) {
-	const res = http.GET(url, {}, true)
+	const res = http.GET(url, defaultHeaders, true)
 	if (res.code !== 200) {
 		return null;
 	}
@@ -316,7 +319,9 @@ source.getContentDetails = function (url) {
 	let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
 	const authorHref = firstByClassOrNull(doc, "media-by--a");
 	const authorThumbnail = firstByClassOrNull(authorHref, "user-image");
-
+	
+	const subscribersElement = firstByClassOrNull(authorHref,`media-heading-num-followers`);
+	
 	const authorThumbnailUrl = userImages[getThumbnailId(authorThumbnail)];
 	const thumbnailUrl = videoObject?.thumbnailUrl;
 	const thumbnails = [];
@@ -331,7 +336,8 @@ source.getContentDetails = function (url) {
 	const downVotesMatch = /<span data-js="rumbles_down_votes">([^<]+)<\/span>/.exec(res.body);
 	const downVotes = downVotesMatch ? downVotesMatch[1] : null;
 	const rating = new RatingLikesDislikes(fromHumanNumber(upVotes) ?? 0, fromHumanNumber(downVotes) ?? 0);
-
+	const subscribers = extractSubCount(subscribersElement);
+	
 	let description = ""
 	if (videoObject.description !== "") {
 		const description_child_nodes = doc.querySelector(`[data-js="media_long_description_container"]`).childNodes
@@ -354,9 +360,10 @@ source.getContentDetails = function (url) {
 		name: videoDetail.title ?? "",
 		thumbnails: new Thumbnails(thumbnails),
 		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref.getAttribute("href")),
-			videoDetail.author.name ?? "",
-			videoDetail.author.url,
-			authorThumbnailUrl ?? null),
+		videoDetail.author.name ?? "",
+		videoDetail.author.url,
+		authorThumbnailUrl ?? null,
+		subscribers),
 		datetime: dateToUnixTime(videoObject?.uploadDate),
 		duration: videoDetail.duration ?? -1,
 		viewCount: (userInteractionCount ? Number.parseInt(userInteractionCount) : 0),
@@ -369,7 +376,7 @@ source.getContentDetails = function (url) {
 	});
 };
 source.getLiveChatWindow = function (url) {
-	const res = http.GET(url, {});
+	const res = http.GET(url, defaultHeaders);
 	if (res.isOk) {
 		const vid = findVideoIdInteger(res.body);
 
@@ -381,11 +388,11 @@ source.getLiveChatWindow = function (url) {
 };
 source.getComments = function (url) {
 	const comments = [];
-	const res = http.GET(url, {}, true);
+	const res = http.GET(url, defaultHeaders, true);
 	let lastCommentPerLevel = {};
 	if (res.isOk) {
 		const vid = findVideoId(res.body).substring(1);
-		const commentsRes = http.GET(URL_COMMENTS + vid, {}, true);
+		const commentsRes = http.GET(URL_COMMENTS + vid, defaultHeaders, true);
 		if (commentsRes.isOk) {
 			const obj = JSON.parse(commentsRes.body);
 
@@ -467,7 +474,7 @@ source.getUserSubscriptions = function () {
 		return [];
 	}
 
-	const res = http.GET("https://rumble.com/account/channel/subscriptions", {}, true);
+	const res = http.GET("https://rumble.com/account/channel/subscriptions", defaultHeaders, true);
 	if (res.code != 200) {
 		bridge.log("Failed to retrieve subscriptions page.");
 		return [];
@@ -1036,6 +1043,33 @@ function extractAgoText_Timestamp(str) {
 			throw new ScriptException("Unknown time type: " + match[2]);
 	}
 }
+
+/**
+ * Parse subscriber count from element
+ * @param {HTMLElement} subscribersElement
+ * @returns {number?} Number of subscribers
+ */
+function extractSubCount(subscribersElement) {
+	
+    const subscribersText = subscribersElement?.textContent?.trim()?.toLowerCase();
+	const sufix = " followers" ;
+    if (!subscribersText || !subscribersText.endsWith(sufix)) {
+		
+        return 0; // Default to 0 if text is invalid or doesn't end with " Followers"
+    }
+
+    const subscriberCount = subscribersText.slice(0, - sufix.length).trim();
+	
+    try {
+        const parsedCount = fromHumanNumber(subscriberCount);
+		
+        return parsedCount ?? 0; // Return parsed value or fallback to 0
+    } catch (error) {
+		log("Error parsing subscriber count " + error);
+        return 0;
+    }
+}
+
 
 class RumbleComment extends Comment {
 	constructor(obj) {
