@@ -6,9 +6,9 @@
 
 	"platformUrl": "https://rumble.com",
 	"sourceUrl": "https://plugins.grayjay.app/Rumble/RumbleConfig.json",
-	"repositoryUrl": "https://futo.org",
+	"repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/rumble",
 	"scriptUrl": "./RumbleScript.js",
-  "version": 50,
+	"version": 50,
 	"iconUrl": "./rumble.png",
 	"id": "2ce7b35e-d2b2-4adb-a728-a34a30d30359",
 
