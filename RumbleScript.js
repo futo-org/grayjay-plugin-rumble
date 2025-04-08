@@ -285,24 +285,35 @@ source.getContentDetails = function (url) {
 	let isLive = liveHeaderInfo.length > 0 && liveHeaderInfo[0].getElementsByClassName("live-video-view-count-status").length > 0;
 	let liveStream = null;
 	for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
-		if (containerName == "timeline") {
+		if (["timeline", "audio"].includes(containerName?.toLocaleLowerCase())) {
 			continue;
 		}
 
-		if (containerName == "hls") {
-			for (const [resolution, data] of Object.entries(resolutions)) {
+		const resolutionKeys = Object.keys(resolutions);
+
+		const sortedResolutions = resolutionKeys
+		.filter(e => !isNaN(e))
+		.sort((a, b) => parseInt(b) - parseInt(a))
+		
+		const auto = resolutionKeys.filter(e => isNaN(e))
+
+		for (const resolution of [...auto, ...sortedResolutions]) {
+
+			const data = resolutions[resolution];
+
+			if (["hls", "tar"].includes(containerName?.toLocaleLowerCase())) {
+
 				const stream = new HLSSource({
 					name: `Stream ${resolution}`,
-					url: data.url
+					url: data.url,
+					priority: resolution === 'auto'
 				});
 
 				sources.push(stream);
 				if (isLive && data.meta.live) {
 					liveStream = stream;
 				}
-			}
-		} else {
-			for (const [resolution, data] of Object.entries(resolutions)) {
+			} else {
 				sources.push(new VideoUrlSource({
 					name: `Original ${resolution}P`,
 					url: data.url,
@@ -317,6 +328,7 @@ source.getContentDetails = function (url) {
 	}
 
 	let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
+	debugger;
 	const authorHref = firstByClassOrNull(doc, "media-by--a");
 	const authorThumbnail = firstByClassOrNull(authorHref, "user-image");
 	
