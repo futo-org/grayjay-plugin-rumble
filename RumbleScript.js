@@ -258,7 +258,6 @@ source.getContentDetails = function (url) {
 	}
 
 	const vidInfo = findVideoInfo(res.body)
-	const vid = vidInfo.video
 	if (vidInfo === null) {
 		if (bridge.isLoggedIn()) {
 			throw new LoginRequiredException("Subscribe to watch premium content")
@@ -266,6 +265,7 @@ source.getContentDetails = function (url) {
 			throw new LoginRequiredException("Login to access premium content")
 		}
 	}
+	const vid = vidInfo.video
 	if (vidInfo.show_premium_exclusive_gate) {
 		bridge.toast("Contains premium exclusive section. Subscribe to watch premium content")
 	}
@@ -302,11 +302,13 @@ source.getContentDetails = function (url) {
 			const data = resolutions[resolution];
 
 			if (["hls", "tar"].includes(containerName?.toLocaleLowerCase())) {
+				if (resolution !== "auto") {
+					continue
+				}
 
 				const stream = new HLSSource({
-					name: `Stream ${resolution}`,
+					name: "Rumble HLS",
 					url: data.url,
-					priority: resolution === 'auto'
 				});
 
 				sources.push(stream);
