@@ -8,7 +8,7 @@
 	"sourceUrl": "https://plugins.grayjay.app/Rumble/RumbleConfig.json",
 	"repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/rumble",
 	"scriptUrl": "./RumbleScript.js",
-	"version": 52,
+	"version": 53,
 	"iconUrl": "./rumble.png",
 	"id": "2ce7b35e-d2b2-4adb-a728-a34a30d30359",
 
@@ -20,6 +20,21 @@
 	"allowUrls": [
 		"rumble.com"
 	],
+	"settings": [
+		{
+			"variable": "liveChatHeader",
+			"name": "Live Chat",
+			"description": "",
+			"type": "Header"
+		},
+		{
+			"variable": "liveChatHidePinnedMessage",
+			"name": "Hide Live Chat pinned message",
+			"description": "",
+			"type": "Boolean",
+			"default": "false"
+		}
+	],
 	
 	"authentication": {
 		"loginUrl": "https://rumble.com/login.php",
@@ -30,6 +45,9 @@
 	"changelog": {
 		"52" : [
 			"Fix source list removing bad HLS sources"
+		],
+		"53": [
+			"Improvement: Add plugin setting to hide live chat pinned message;"
 		]
 	}
 }

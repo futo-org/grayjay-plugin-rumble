@@ -20,15 +20,17 @@ const REGEX_VIDEO_INFO = /Rumble\("play", ({".*?),"api"/
 const PLATFORM = "Rumble";
 const PLATFORM_CLAIMTYPE = 4;
 
-var config = {};
+let config = {};
+let settings = {};
 
 const defaultHeaders = {
 	'User-Agent' : USER_AGENT
 }
 
 //Source Methods
-source.enable = function (conf) {
+source.enable = function (conf, setts) {
 	config = conf ?? {};
+	settings = setts ?? {};
 	log(config);
 }
 source.getHome = function () {
@@ -394,9 +396,15 @@ source.getLiveChatWindow = function (url) {
 	if (res.isOk) {
 		const vid = findVideoIdInteger(res.body);
 
+		const removeElements = [".chat--header"];
+
+		if(settings.liveChatHidePinnedMessage) {
+			removeElements.push(".chat__pinned-ui-container");
+		}
+
 		return {
 			url: "https://rumble.com/chat/popup/" + vid,
-			removeElements: [".chat--header"]
+			removeElements
 		};
 	}
 };
