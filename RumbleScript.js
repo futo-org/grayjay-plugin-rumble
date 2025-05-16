@@ -176,8 +176,19 @@ function getChannelsPage(query, page = null) {
 		results.push(authorLink);
 		articleIndex++;
 	}
-	const hasMoreQuery = `a[href='/search/channel?q=${query}&page=${(page ?? 1) + 1}']`;
-	return { results, hasMore: doc.querySelector(hasMoreQuery) ? true : false };
+
+	let hasMore = false;
+
+	const headLinks = doc.querySelectorAll("link[rel='next']");
+	for (let i = 0; i < headLinks.length; i++) {
+		const link = headLinks[i];
+		if (link.getAttribute("rel") === "next") {
+			hasMore = true;
+			break;
+		}
+	}
+
+	return { results, hasMore};
 }
 
 source.searchChannels = function (query) {
