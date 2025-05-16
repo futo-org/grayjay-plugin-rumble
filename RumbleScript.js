@@ -332,7 +332,7 @@ source.getContentDetails = function (url) {
 	}
 
 	let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
-	debugger;
+
 	const authorHref = firstByClassOrNull(doc, "media-by--a");
 	const authorThumbnail = firstByClassOrNull(authorHref, "user-image");
 	
@@ -832,11 +832,10 @@ function getVideosPager(url, params, author) {
 
 		const page = params.page ?? 1;
 		let hasMore = false;
-		const nextPageElements = doc.getElementsByClassName("paginator--link");
-		for (let i = 0; i < nextPageElements.length; i++) {
-			const e = nextPageElements[i];
-			const pageString = e?.getAttribute("aria-label");
-			if (pageString == (page + 1).toString()) {
+		const headLinks = doc.querySelectorAll("link[rel='next']");		
+		for (let i = 0; i < headLinks.length; i++) {
+			const link = headLinks[i];
+			if (link.getAttribute("rel") === "next") {
 				hasMore = true;
 				break;
 			}
