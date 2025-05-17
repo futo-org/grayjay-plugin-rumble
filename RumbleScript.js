@@ -200,32 +200,79 @@ source.isChannelUrl = function (url) {
 	return url.startsWith(URL_BASE_CHANNEL) || url.startsWith(URL_BASE_CHANNEL_ALT);
 };
 source.getChannel = function (url) {
-	const res = http.GET(url, defaultHeaders);
+
+	if(!url) {
+		throw new ScriptException("Failed to get channel. No URL provided.");
+	}
+
+	let aboutTabUrl = url?.toLocaleLowerCase();
+	
+	if(!aboutTabUrl.includes('/about')) {
+		if(aboutTabUrl.endsWith('/')) {
+			aboutTabUrl += 'about';
+		} else {
+			aboutTabUrl += '/about';
+		}
+	}
+
+	const res = http.GET(aboutTabUrl, defaultHeaders);
 	if (!res.isOk) {
 		throw new ScriptException(`Failed to get channel (${res.status}).`);
 	}
 
 	const prefix = "channel"
 	const doc = domParser.parseFromString(res.body, "text/html");
-	const title = firstByTagOrNull(firstByClassOrNull(doc, `${prefix}-header--title`), "h1");
-	const img = firstByClassOrNull(doc, `${prefix}-header--thumb`);
-	const banner = firstByClassOrNull(doc, `${prefix}-header--backsplash-img`);
-	const subscribersElement = doc.querySelector(`.${prefix}-header--title span`);
-
+	
+	const [title] = doc.querySelectorAll(`.${prefix}-header--title h1`);
+	
+	const [img] = doc.querySelectorAll(`.${prefix}-header--img`);
+	
+	const [banner] = doc.querySelectorAll(`.${prefix}-header--backsplash-img`);
+	
+	const [subscribersElement] = doc.querySelectorAll(`.${prefix}-header--title span`);
+	
+	const [descriptionElement] = doc.querySelectorAll(`.${prefix}-about--description`);
+	
+	const socialLinksElments = doc.querySelectorAll(`.channel-about--socials a`);
+	
+	let links = {};
+	for (let i = 0; i < socialLinksElments.length; i++) {
+		const link = socialLinksElments[i];
+		const href = link.getAttribute("href");	
+		const name = link.textContent?.trim();
+		links[name] = href;
+	}
+	
 	let imageUrl = img?.getAttribute("src");
 	if (!imageUrl) {
-		imageUrl = firstByClassOrNull(doc, `${prefix}-header--img`)?.getAttribute("src");
+		const [imageEl] = doc.querySelectorAll(`.${prefix}-header--img`);	
+		if(imageEl) {
+			imageUrl = imageEl.getAttribute("src");
+		}
+	}
+
+	let description = descriptionElement?.textContent ?? "";
+
+	const additionalInfoElements = doc.querySelectorAll(`.${prefix}-about-sidebar--inner p`);
+	
+	if(additionalInfoElements.length) {
+		description += "<h3>Additional Details</h3>";
+	}
+
+	for (let i = 0; i < additionalInfoElements.length; i++) {
+		const element = additionalInfoElements[i];
+		description +=  `<p>${element.textContent}</p>`;
 	}
 
 	const channel = new PlatformChannel({
 		id: getAuthorIdFromUrl(url),
 		name: title?.textContent ?? "",
 		thumbnail: asAbsoluteURL(imageUrl),
-		banner: banner?.getAttribute("src"),
+		banner: banner?.getAttribute("src") ?? "",
 		subscribers: extractSubCount(subscribersElement),
-		description: "",
-		url: url,
-		links: {}
+		description,
+		url,
+		links
 	});
 	//doc.dispose();
 	return channel;
