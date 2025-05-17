@@ -217,7 +217,16 @@ source.getChannel = function (url) {
 
 	const res = http.GET(aboutTabUrl, defaultHeaders);
 	if (!res.isOk) {
-		throw new ScriptException(`Failed to get channel (${res.status}).`);
+
+		if(res.code === 404) {
+			throw new UnavailableException(`Channel not found (${res.code}) for ${url}`);
+		}
+		
+		if(res.code === 410) {
+			throw new UnavailableException(`Channel removed (${res.code}) for ${url}`);
+		}
+
+		throw new ScriptException(`Failed to get channel (${res.code}) for ${url}.`);
 	}
 
 	const prefix = "channel"
