@@ -382,7 +382,7 @@ source.getContentDetails = function (url) {
 
 	//doc.dispose();
 
-	return new PlatformVideoDetails({
+	const videoDetails = new PlatformVideoDetails({
 		id: new PlatformID(PLATFORM, id, config.id),
 		name: videoDetail.title ?? "",
 		thumbnails: new Thumbnails(thumbnails),
@@ -401,6 +401,12 @@ source.getContentDetails = function (url) {
 		video: new VideoSourceDescriptor(sources),
 		live: liveStream
 	});
+	
+	videoDetails.getContentRecommendations = function() {
+		return source.getContentRecommendations(url, res);
+	};
+	
+	return videoDetails;
 };
 source.getLiveChatWindow = function (url) {
 	const res = http.GET(url, defaultHeaders);
@@ -564,6 +570,111 @@ class RumbleCommentPager extends CommentPager {
 		return this;
 	}
 }
+
+source.getContentRecommendations = function (url, res) {
+
+	if (!res) {
+		res = http.GET(url, defaultHeaders, true);
+
+		if (!res.isOk) {
+			return null;
+		}
+	}
+
+	const doc = domParser.parseFromString(res.body, "text/html");
+
+	const relatedVideos = [];
+	const userImages = getUserImageList(res.body);
+
+	// Parse related videos from the sidebar
+	const mediaListItems = doc.querySelectorAll(".mediaList-item") ?? [];
+
+	for (let i = 0; i < mediaListItems.length; i++) {
+		try {
+			const item = mediaListItems[i];
+			const link = item.querySelector(".mediaList-link");
+			if (!link) {
+				continue;
+			};
+
+			const url = asAbsoluteURL(link.getAttribute("href"));
+			const id = getVideoIdFromUrl(url);
+
+			const img = item.querySelector(".mediaList-image");
+			const thumbnails = [];
+			if (img) {
+				const src = img.getAttribute("src");
+				if (src) {
+					thumbnails.push(new Thumbnail(src, 0));
+				}
+			}
+
+			const title = item.querySelector(".mediaList-heading");
+
+			const durationElement = item.querySelector(".mediaList-duration");
+			const duration = hhmmssToDuration(durationElement?.textContent);
+
+			const viewsElement = item.querySelector(".video-counters--item.video-item--views");
+			let viewCount = 0;
+			if (viewsElement) {
+				const viewText = viewsElement?.textContent?.trim() ?? "";
+				viewCount = fromHumanNumber(viewText) || 0;
+			}
+
+			const channelSection = item.querySelector(".mediaList-by");
+
+			const channelNameElement = channelSection?.querySelector(".mediaList-by-heading");
+
+			const channelName = channelNameElement?.textContent;
+
+			const [channelLink] = channelSection?.querySelectorAll("a");
+
+			const channelHref = channelLink?.getAttribute?.("href");
+
+
+			const channelUrl = asAbsoluteURL(channelHref);
+			const channelId = getAuthorIdFromUrl(channelUrl);
+
+			const channelImage = channelSection?.querySelector("[data-js='user-image']");
+			const channelImageId = getThumbnailId(channelImage);
+			const channelImageUrl = userImages[channelImageId];
+
+			const [liveElement] = item.querySelectorAll(".mediaList-live");
+			const isLive = !!liveElement;
+
+			const [timestampElement] = item.querySelectorAll(".mediaList-timestamp");
+
+			let uploadDate = 0;
+			if (timestampElement) {
+				uploadDate = extractAgoText_Timestamp(timestampElement.textContent);
+			}
+
+			const video = new PlatformVideo({
+				id: new PlatformID(PLATFORM, id, config.id),
+				name: title?.textContent?.trim() ?? "",
+				thumbnails: new Thumbnails(thumbnails),
+				author: new PlatformAuthorLink(
+					channelId,
+					channelName ?? "",
+					channelUrl ?? "",
+					asAbsoluteURL(channelImageUrl) ?? ""
+				),
+				uploadDate: uploadDate,
+				duration: duration,
+				viewCount: viewCount,
+				url: url,
+				isLive: isLive
+			});
+
+			relatedVideos.push(video);
+		} catch (e) {
+			log("Error parsing related video " + e);
+		}
+	}
+
+	return new VideoPager(relatedVideos, false);
+};
+
 //#endregion
 
 //#region Parsing
@@ -576,6 +687,10 @@ class RumbleCommentPager extends CommentPager {
 function getThumbnailId(e) {
 	if (!e) {
 		return null;
+	}
+
+	if(!e.classList) {
+		e.classList = e?.attributes?.['class']?.split?.(' ') ?? [];
 	}
 
 	for (let i = 0; i < e.classList.length; i++) {
