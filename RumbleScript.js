@@ -1003,7 +1003,7 @@ function getVideosPager(url, params, author) {
 		}
 
 		{
-			const elements = doc.getElementsByClassName("videostream");
+			const elements = doc.querySelectorAll(".thumbnail__grid .videostream");
 			const r = parseVideoStreams(elements, author);
 			results.push(...r);
 		}

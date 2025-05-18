@@ -52,6 +52,7 @@
 		"54": [
 			"Improvement: Add channel description and links;",
 			"Improvement: Add recommended videos to video details;",
+			"Fix: Do not duplicate featured video to channel videos and subscriptions tab;",
 			"Fix: Update pagination detection for Home tab;",
 			"Fix: Update pagination detection channel videos;"
 		]
