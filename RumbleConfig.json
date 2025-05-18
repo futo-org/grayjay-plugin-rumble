@@ -8,7 +8,7 @@
 	"sourceUrl": "https://plugins.grayjay.app/Rumble/RumbleConfig.json",
 	"repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/rumble",
 	"scriptUrl": "./RumbleScript.js",
-	"version": 53,
+	"version": 54,
 	"iconUrl": "./rumble.png",
 	"id": "2ce7b35e-d2b2-4adb-a728-a34a30d30359",
 
@@ -48,6 +48,13 @@
 		],
 		"53": [
 			"Improvement: Add plugin setting to hide live chat pinned message;"
+		],
+		"54": [
+			"Improvement: Add channel description and links;",
+			"Improvement: Add recommended videos to video details;",
+			"Fix: Do not duplicate featured video to channel videos and subscriptions tab;",
+			"Fix: Fix Home content pagination;",
+			"Fix: Fix channel videos pagination;"
 		]
 	}
 }
