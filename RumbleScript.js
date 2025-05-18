@@ -643,8 +643,8 @@ source.getContentRecommendations = function (url, res) {
 	const userImages = getUserImageList(res.body);
 
 	// Parse related videos from the sidebar
-	const mediaListItems = doc.querySelectorAll(".mediaList-item") ?? [];
-
+	const mediaListItems = doc.querySelectorAll("aside .mediaList-item") ?? [];
+	
 	for (let i = 0; i < mediaListItems.length; i++) {
 		try {
 			const item = mediaListItems[i];
