@@ -23,6 +23,9 @@ const PLATFORM_CLAIMTYPE = 4;
 let config = {};
 let settings = {};
 
+// TODO: workaround for desktop since currently it doesn't support rendering html in channel description
+const isAndroid = bridge.buildPlatform === "android";
+
 const defaultHeaders = {
 	'User-Agent' : USER_AGENT
 }
@@ -262,14 +265,28 @@ source.getChannel = function (url) {
 	let description = descriptionElement?.textContent ?? "";
 
 	const additionalInfoElements = doc.querySelectorAll(`.${prefix}-about-sidebar--inner p`);
-	
-	if(additionalInfoElements.length) {
+
+	if(additionalInfoElements.length && isAndroid) {
 		description += "<h3>Additional Details</h3>";
 	}
 
 	for (let i = 0; i < additionalInfoElements.length; i++) {
 		const element = additionalInfoElements[i];
-		description +=  `<p>${element.textContent}</p>`;
+
+		//TODO: workaround for desktop since currently it doesn't support rendering html in channel description
+		if(isAndroid) {
+			description += `<p>`;
+		} else if(i === 0) {
+			description += ` | `;
+		}
+
+		description +=  element.textContent;
+
+		if(isAndroid) {
+			description += `</p>`;
+		} else {
+			description += ` | `;
+		}
 	}
 
 	const channel = new PlatformChannel({
