@@ -596,13 +596,13 @@ source.getUserSubscriptions = function () {
 
 //#region Pagers
 class RumbleVideoPager extends VideoPager {
-	constructor(results, hasMore, url, params) {
-		super(results, hasMore, { url, params });
+	constructor(results, hasMore, url, params, author) {
+		super(results, hasMore, { url, params, author });
 	}
 
 	nextPage() {
 		const newParams = { ... this.context.params, page: (this.context.params.page ?? 1) + 1 };
-		return getVideosPager(this.context.url, newParams);
+		return getVideosPager(this.context.url, newParams, this.context.author);
 	}
 }
 
@@ -644,7 +644,7 @@ source.getContentRecommendations = function (url, res) {
 
 	// Parse related videos from the sidebar
 	const mediaListItems = doc.querySelectorAll("aside .mediaList-item") ?? [];
-	
+
 	for (let i = 0; i < mediaListItems.length; i++) {
 		try {
 			const item = mediaListItems[i];
@@ -1024,7 +1024,7 @@ function getVideosPager(url, params, author) {
 		}
 
 		//doc.dispose();
-		return new RumbleVideoPager(results, hasMore, url, params);
+		return new RumbleVideoPager(results, hasMore, url, params, author);
 	}
 
 	return new VideoPager([], false);
