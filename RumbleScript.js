@@ -31,7 +31,6 @@ const defaultHeaders = {
 source.enable = function (conf, setts) {
 	config = conf ?? {};
 	settings = setts ?? {};
-	log(config);
 }
 source.getHome = function () {
 	return getVideosPager(URL_VIDEOS, {
@@ -579,7 +578,6 @@ source.getUserSubscriptions = function () {
 	const doc = domParser.parseFromString(res.body, "text/html");
 	const tables = doc.getElementsByTagName("table");
 	const aElements = tables[0].getElementsByTagName("a");
-	bridge.log(aElements.length.toString() + " elements found");
 
 	for (let i = 0; i < aElements.length; i++) {
 		const href = aElements[i].getAttribute("href").toLowerCase();
@@ -587,8 +585,6 @@ source.getUserSubscriptions = function () {
 			channelUrls.push(asAbsoluteURL(href));
 		}
 	}
-
-	bridge.log(channelUrls.length.toString() + " channels found");
 
 	//doc.dispose();
 	return channelUrls;
@@ -1312,4 +1308,4 @@ class RumbleChannelPager extends ChannelPager {
 
 //#endregion
 
-console.log("LOADED");
+log("LOADED");
