@@ -29,12 +29,33 @@ const isAndroid = bridge.buildPlatform === "android";
 const defaultHeaders = {
 	'User-Agent' : USER_AGENT
 }
+let state = {
+	defaultHeaders: {
+		'User-Agent': USER_AGENT,
+	}
+};
 
 //Source Methods
-source.enable = function (conf, setts) {
+source.enable = function (conf, setts, saveStateStr) {
+
 	config = conf ?? {};
 	settings = setts ?? {};
+
+	if(saveStateStr) {
+		state = JSON.parse(saveStateStr);
+	} else {
+		const res = http.GET('https://api.ipify.org', {});
+
+		if(res.isOk) {
+			state.defaultHeaders.Cookie = `RNSC=${res.body};`;
+		}
+	}
 }
+
+source.saveState = () => {
+    return JSON.stringify(state);
+};
+
 source.getHome = function () {
 	return getVideosPager(URL_VIDEOS, {
 		sort: "views",
@@ -114,7 +135,7 @@ source.search = function (query, type, order, filters) {
 
 function getChannelsPage(query, page = null) {
 	const url = URL_SEARCH_CHANNEL + query + (page ? `&page=${page}` : "");
-	const res = http.GET(url, defaultHeaders);
+	const res = http.GET(url, state.defaultHeaders);
 	if (!res.isOk) {
 		return [];
 	}
@@ -217,7 +238,7 @@ source.getChannel = function (url) {
 		}
 	}
 
-	const res = http.GET(aboutTabUrl, defaultHeaders);
+	const res = http.GET(aboutTabUrl, state.defaultHeaders);
 	if (!res.isOk) {
 
 		if(res.code === 404) {
@@ -323,7 +344,7 @@ source.isContentDetailsUrl = function (url) {
 	return url.startsWith(URL_BASE_VIDEO);
 };
 source.getContentDetails = function (url) {
-	const res = http.GET(url, defaultHeaders, true)
+	const res = http.GET(url, state.defaultHeaders, true)
 	if (res.code !== 200) {
 		return null;
 	}
@@ -481,7 +502,7 @@ source.getContentDetails = function (url) {
 	return videoDetails;
 };
 source.getLiveChatWindow = function (url) {
-	const res = http.GET(url, defaultHeaders);
+	const res = http.GET(url, state.defaultHeaders);
 	if (res.isOk) {
 		const vid = findVideoIdInteger(res.body);
 
@@ -499,11 +520,11 @@ source.getLiveChatWindow = function (url) {
 };
 source.getComments = function (url) {
 	const comments = [];
-	const res = http.GET(url, defaultHeaders, true);
+	const res = http.GET(url, state.defaultHeaders, true);
 	let lastCommentPerLevel = {};
 	if (res.isOk) {
 		const vid = findVideoId(res.body).substring(1);
-		const commentsRes = http.GET(URL_COMMENTS + vid, defaultHeaders, true);
+		const commentsRes = http.GET(URL_COMMENTS + vid, state.defaultHeaders, true);
 		if (commentsRes.isOk) {
 			const obj = JSON.parse(commentsRes.body);
 
@@ -585,7 +606,7 @@ source.getUserSubscriptions = function () {
 		return [];
 	}
 
-	const res = http.GET("https://rumble.com/account/channel/subscriptions", defaultHeaders, true);
+	const res = http.GET("https://rumble.com/account/channel/subscriptions", state.defaultHeaders, true);
 	if (res.code != 200) {
 		bridge.log("Failed to retrieve subscriptions page.");
 		return [];
@@ -1006,7 +1027,8 @@ function parseVideoStreams(elements, author) {
  * @param {PlatformAuthorLink?} author The author of the video
  */
 function getVideosPager(url, params, author) {
-	const res = http.GET(`${url}${buildQuery(params)}`, { "Cookie": `PNRC=${Math.floor(Math.random() * 312938162)}` });
+
+	const res = http.GET(`${url}${buildQuery(params)}`, state.defaultHeaders);
 
 	if (res.code == 200) {
 		const doc = domParser.parseFromString(res.body, "text/html");
