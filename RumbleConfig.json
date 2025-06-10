@@ -8,7 +8,7 @@
 	"sourceUrl": "https://plugins.grayjay.app/Rumble/RumbleConfig.json",
 	"repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/rumble",
 	"scriptUrl": "./RumbleScript.js",
-	"version": 55,
+	"version": 56,
 	"iconUrl": "./rumble.png",
 	"id": "2ce7b35e-d2b2-4adb-a728-a34a30d30359",
 
@@ -59,6 +59,9 @@
 		],
 		"55": [
 			"Fix: Home tab not loading in some regions;"
+		],
+		"56": [
+			"Change: Prevent 1081P from displaying as a source name instead of 1080P;"
 		]
 	}
 }
