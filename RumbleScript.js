@@ -16,6 +16,7 @@ const REGEX_VIDEO_IMAGE_CSS = /.video-item--by-a--([0-9a-z]+)::before\s*\{\s*bac
 const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
 const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
 const REGEX_VIDEO_INFO = /Rumble\("play", ({".*?),"api"/
+const REGEX_EMBED_URL = /^https?:\/\/(www\.)?rumble\.com\/embed\//;
 
 const PLATFORM = "Rumble";
 const PLATFORM_CLAIMTYPE = 4;
@@ -342,9 +343,27 @@ source.getChannelTemplateByClaimMap = () => {
 
 //Video
 source.isContentDetailsUrl = function (url) {
-	return url.startsWith(URL_BASE_VIDEO);
+	return url.startsWith(URL_BASE_VIDEO) || isEmbedUrl(url);
 };
 source.getContentDetails = function (url) {
+
+	if (isEmbedUrl(url)) {
+		let canonicalUrl;
+
+		const canonicalUrlResolutionRes = http.GET(url, state.defaultHeaders, true);
+		if (canonicalUrlResolutionRes.isOk) {
+			const doc = domParser.parseFromString(canonicalUrlResolutionRes.body, "text/html");
+			canonicalUrl = doc.querySelector("link[rel='canonical']")?.getAttribute("href");
+		}
+
+		if (canonicalUrl) {
+			url = canonicalUrl;
+		}
+		else {
+			throw new ScriptException(`Failed to get canonical url for embed url: [${url}]`);
+		}
+	}
+
 	const res = http.GET(url, state.defaultHeaders, true)
 	if (res.code !== 200) {
 		return null;
@@ -1309,6 +1328,14 @@ function extractSubCount(subscribersElement) {
     }
 }
 
+/**
+ * Checks if a URL is a Rumble embed URL
+ * @param {string} url - The URL to check
+ * @returns {boolean} True if the URL matches the Rumble embed URL pattern
+ */
+function isEmbedUrl(url) {
+	return REGEX_EMBED_URL.test(url);
+}
 
 class RumbleComment extends Comment {
 	constructor(obj) {

@@ -77,7 +77,8 @@
 			"Change: Prevent 1081P from displaying as a source name instead of 1080P;"
 		],
 		"57": [
-			"Improvement: Add setting to toggle requests to api.ipify.org for setting the RNSC cookie required in some regions;"
+			"Improvement: Add setting to toggle requests to api.ipify.org for setting the RNSC cookie required in some regions;",
+			"Improvement: Add support for embed URLs;"
 		]
 	}
 }
