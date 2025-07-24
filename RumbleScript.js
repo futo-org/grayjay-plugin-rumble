@@ -26,9 +26,6 @@ let settings = {};
 // TODO: workaround for desktop since currently it doesn't support rendering html in channel description
 const isAndroid = bridge.buildPlatform === "android";
 
-const defaultHeaders = {
-	'User-Agent' : USER_AGENT
-}
 let state = {
 	defaultHeaders: {
 		'User-Agent': USER_AGENT,
@@ -41,12 +38,12 @@ source.enable = function (conf, setts, saveStateStr) {
 	config = conf ?? {};
 	settings = setts ?? {};
 
-	if(saveStateStr) {
+	if (saveStateStr) {
 		state = JSON.parse(saveStateStr);
-	} else {
+	} else if (settings.useIpifyForRNSC) {
 		const res = http.GET('https://api.ipify.org', {});
 
-		if(res.isOk) {
+		if (res.isOk) {
 			state.defaultHeaders.Cookie = `RNSC=${res.body};`;
 		}
 	}
@@ -664,7 +661,7 @@ class RumbleCommentPager extends CommentPager {
 source.getContentRecommendations = function (url, res) {
 
 	if (!res) {
-		res = http.GET(url, defaultHeaders, true);
+		res = http.GET(url, state.defaultHeaders, true);
 
 		if (!res.isOk) {
 			return null;
