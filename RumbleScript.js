@@ -16,6 +16,7 @@ const REGEX_VIDEO_IMAGE_CSS = /.video-item--by-a--([0-9a-z]+)::before\s*\{\s*bac
 const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
 const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
 const REGEX_VIDEO_INFO = /Rumble\("play", ({".*?),"api"/
+const REGEX_EMBED_URL = /^https?:\/\/(www\.)?rumble\.com\/embed\//;
 
 const PLATFORM = "Rumble";
 const PLATFORM_CLAIMTYPE = 4;
@@ -26,9 +27,6 @@ let settings = {};
 // TODO: workaround for desktop since currently it doesn't support rendering html in channel description
 const isAndroid = bridge.buildPlatform === "android";
 
-const defaultHeaders = {
-	'User-Agent' : USER_AGENT
-}
 let state = {
 	defaultHeaders: {
 		'User-Agent': USER_AGENT,
@@ -41,13 +39,17 @@ source.enable = function (conf, setts, saveStateStr) {
 	config = conf ?? {};
 	settings = setts ?? {};
 
-	if(saveStateStr) {
+	if (saveStateStr) {
 		state = JSON.parse(saveStateStr);
-	} else {
-		const res = http.GET('https://api.ipify.org', {});
+	} else if (settings.useIpifyForRNSC) {
 
-		if(res.isOk) {
-			state.defaultHeaders.Cookie = `RNSC=${res.body};`;
+		try {
+			const res = http.GET('https://api.ipify.org', {});
+			if (res.isOk) {
+				state.defaultHeaders.Cookie = `RNSC=${res.body};`;
+			}
+		} catch (error) {
+			bridge.log("Failed to get IP address from ipify.org " + error);
 		}
 	}
 }
@@ -341,9 +343,27 @@ source.getChannelTemplateByClaimMap = () => {
 
 //Video
 source.isContentDetailsUrl = function (url) {
-	return url.startsWith(URL_BASE_VIDEO);
+	return url.startsWith(URL_BASE_VIDEO) || isEmbedUrl(url);
 };
 source.getContentDetails = function (url) {
+
+	if (isEmbedUrl(url)) {
+		let canonicalUrl;
+
+		const canonicalUrlResolutionRes = http.GET(url, state.defaultHeaders, true);
+		if (canonicalUrlResolutionRes.isOk) {
+			const doc = domParser.parseFromString(canonicalUrlResolutionRes.body, "text/html");
+			canonicalUrl = doc.querySelector("link[rel='canonical']")?.getAttribute("href");
+		}
+
+		if (canonicalUrl) {
+			url = canonicalUrl;
+		}
+		else {
+			throw new ScriptException(`Failed to get canonical url for embed url: [${url}]`);
+		}
+	}
+
 	const res = http.GET(url, state.defaultHeaders, true)
 	if (res.code !== 200) {
 		return null;
@@ -664,7 +684,7 @@ class RumbleCommentPager extends CommentPager {
 source.getContentRecommendations = function (url, res) {
 
 	if (!res) {
-		res = http.GET(url, defaultHeaders, true);
+		res = http.GET(url, state.defaultHeaders, true);
 
 		if (!res.isOk) {
 			return null;
@@ -1308,6 +1328,14 @@ function extractSubCount(subscribersElement) {
     }
 }
 
+/**
+ * Checks if a URL is a Rumble embed URL
+ * @param {string} url - The URL to check
+ * @returns {boolean} True if the URL matches the Rumble embed URL pattern
+ */
+function isEmbedUrl(url) {
+	return REGEX_EMBED_URL.test(url);
+}
 
 class RumbleComment extends Comment {
 	constructor(obj) {
