@@ -41,10 +41,14 @@ source.enable = function (conf, setts, saveStateStr) {
 	if (saveStateStr) {
 		state = JSON.parse(saveStateStr);
 	} else if (settings.useIpifyForRNSC) {
-		const res = http.GET('https://api.ipify.org', {});
 
-		if (res.isOk) {
-			state.defaultHeaders.Cookie = `RNSC=${res.body};`;
+		try {
+			const res = http.GET('https://api.ipify.org', {});
+			if (res.isOk) {
+				state.defaultHeaders.Cookie = `RNSC=${res.body};`;
+			}
+		} catch (error) {
+			bridge.log("Failed to get IP address from ipify.org " + error);
 		}
 	}
 }
