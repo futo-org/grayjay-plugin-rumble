@@ -423,7 +423,7 @@ source.getContentDetails = function (url) {
 				}
 			} else {
 				sources.push(new VideoUrlSource({
-					name: `Original ${resolution}P`,
+					name: `Original ${data.meta.h}P`,
 					url: data.url,
 					width: data.meta.w,
 					height: data.meta.h,
