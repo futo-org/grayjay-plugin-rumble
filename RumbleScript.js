@@ -17,6 +17,7 @@ const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
 const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
 const REGEX_VIDEO_INFO = /Rumble\("play", ({".*?),"api"/
 const REGEX_EMBED_URL = /^https?:\/\/(www\.)?rumble\.com\/embed\//;
+const REGEX_CHANNEL_URL = /^https:\/\/rumble\.com\/[a-zA-Z0-9_-]+\/?(?:\?.*)?$/;
 
 const PLATFORM = "Rumble";
 const PLATFORM_CLAIMTYPE = 4;
@@ -32,6 +33,35 @@ let state = {
 		'User-Agent': USER_AGENT,
 	}
 };
+
+const reservedUrls = [
+  "https://rumble.com/followed-channels",
+  "https://rumble.com/our-apps",
+  "https://rumble.com/s/terms",
+  "https://rumble.com/s/dmca",
+  "https://rumble.com/s/privacy",
+  "https://rumble.com/s/digital-accessibility-statement",
+  "https://rumble.com/browse",
+  "https://rumble.com/videos",
+  "https://rumble.com/search",
+  "https://rumble.com/subscriptions",
+  "https://rumble.com/for-you",
+  "https://rumble.com/reposts",
+  "https://rumble.com/editor-picks",
+  "https://rumble.com/my-library",
+  "https://rumble.com/playlists",
+  "https://rumble.com/category/",
+  "https://rumble.com/register",
+  "https://rumble.com/login",
+  "https://rumble.com/logout",
+  "https://rumble.com/account",
+  "https://rumble.com/premium",
+  "https://rumble.com/upload",
+  "https://rumble.com/live",
+  "https://rumble.com/-livestream-api/get-data",
+  "https://rumble.com/api",
+  "https://rumble.com/embed/"
+];
 
 //Source Methods
 source.enable = function (conf, setts, saveStateStr) {
@@ -222,7 +252,11 @@ source.searchChannels = function (query) {
 
 //Channel
 source.isChannelUrl = function (url) {
-	return url.startsWith(URL_BASE_CHANNEL) || url.startsWith(URL_BASE_CHANNEL_ALT);
+
+	if(reservedUrls.some(r => url?.toLowerCase().startsWith(r.toLowerCase()))) {
+		return false;
+	}
+	return url.startsWith(URL_BASE_CHANNEL) || url.startsWith(URL_BASE_CHANNEL_ALT) || REGEX_CHANNEL_URL.test(url);
 };
 source.getChannel = function (url) {
 
