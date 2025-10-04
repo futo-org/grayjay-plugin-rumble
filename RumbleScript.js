@@ -716,7 +716,6 @@ class RumbleCommentPager extends CommentPager {
 }
 
 source.getContentRecommendations = function (url, res) {
-
 	if (!res) {
 		res = http.GET(url, state.defaultHeaders, true);
 
@@ -727,10 +726,23 @@ source.getContentRecommendations = function (url, res) {
 
 	const doc = domParser.parseFromString(res.body, "text/html");
 
+	// Detect if this is a live stream page
+	const liveHeaderInfo = doc.getElementsByClassName("video-header-live-info");
+	const isLiveStreamPage = liveHeaderInfo.length > 0 && liveHeaderInfo[0].getElementsByClassName("live-video-view-count-status").length > 0;
+
+	// Route to appropriate specialized function
+	if (isLiveStreamPage) {
+		return getLiveContentRecommendations(url, res, doc);
+	} else {
+		return getVodContentRecommendations(url, res, doc);
+	}
+};
+
+function getVodContentRecommendations(url, res, doc) {
 	const relatedVideos = [];
 	const userImages = getUserImageList(res.body);
 
-	// Parse related videos from the sidebar
+	// Parse related videos from the sidebar (original logic)
 	const mediaListItems = doc.querySelectorAll("aside .mediaList-item") ?? [];
 
 	for (let i = 0; i < mediaListItems.length; i++) {
@@ -739,10 +751,10 @@ source.getContentRecommendations = function (url, res) {
 			const link = item.querySelector(".mediaList-link");
 			if (!link) {
 				continue;
-			};
+			}
 
-			const url = asAbsoluteURL(link.getAttribute("href"));
-			const id = getVideoIdFromUrl(url);
+			const videoUrl = asAbsoluteURL(link.getAttribute("href"));
+			const id = getVideoIdFromUrl(videoUrl);
 
 			const img = item.querySelector(".mediaList-image");
 			const thumbnails = [];
@@ -768,16 +780,12 @@ source.getContentRecommendations = function (url, res) {
 			const channelSection = item.querySelector(".mediaList-by");
 
 			const channelNameElement = channelSection?.querySelector(".mediaList-by-heading");
-
 			const channelName = channelNameElement?.textContent;
 
 			const [channelLink] = channelSection?.querySelectorAll("a");
-
 			const channelHref = channelLink?.getAttribute?.("href");
 
-
 			const channelUrl = asAbsoluteURL(channelHref);
-			const channelId = getAuthorIdFromUrl(channelUrl);
 
 			const channelImage = channelSection?.querySelector("[data-js='user-image']");
 			const channelImageId = getThumbnailId(channelImage);
@@ -798,7 +806,7 @@ source.getContentRecommendations = function (url, res) {
 				name: title?.textContent?.trim() ?? "",
 				thumbnails: new Thumbnails(thumbnails),
 				author: new PlatformAuthorLink(
-					channelId,
+					getAuthorIdFromUrl(channelUrl),
 					channelName ?? "",
 					channelUrl ?? "",
 					asAbsoluteURL(channelImageUrl) ?? ""
@@ -806,13 +814,104 @@ source.getContentRecommendations = function (url, res) {
 				uploadDate: uploadDate,
 				duration: duration,
 				viewCount: viewCount,
-				url: url,
+				url: videoUrl,
 				isLive: isLive
 			});
 
 			relatedVideos.push(video);
 		} catch (e) {
 			log("Error parsing related video " + e);
+		}
+	}
+
+	return new VideoPager(relatedVideos, false);
+};
+
+function getLiveContentRecommendations(url, res, doc) {
+	const relatedVideos = [];
+	const userImages = getUserImageList(res.body);
+
+	// Try main selectors in one call - live streams likely use same structure as VOD
+	const mediaListItems = doc.querySelectorAll("aside .mediaList-item, .live-recommendations .video-item, .mediaList-item");
+
+	for (let i = 0; i < mediaListItems.length; i++) {
+		try {
+			const item = mediaListItems[i];
+
+			// Use same selectors as VOD since live streams likely use same structure
+			const link = item.querySelector(".mediaList-link");
+			if (!link) {
+				continue;
+			}
+
+			const videoUrl = asAbsoluteURL(link.getAttribute("href"));
+			const id = getVideoIdFromUrl(videoUrl);
+
+			const img = item.querySelector(".mediaList-image");
+			const thumbnails = [];
+			if (img) {
+				const src = img.getAttribute("src");
+				if (src) {
+					thumbnails.push(new Thumbnail(src, 0));
+				}
+			}
+
+			const title = item.querySelector(".mediaList-heading");
+
+			const durationElement = item.querySelector(".mediaList-duration");
+			const duration = hhmmssToDuration(durationElement?.textContent);
+
+			const viewsElement = item.querySelector(".video-counters--item.video-item--views");
+			let viewCount = 0;
+			if (viewsElement) {
+				const viewText = viewsElement?.textContent?.trim() ?? "";
+				viewCount = fromHumanNumber(viewText) || 0;
+			}
+
+			const channelSection = item.querySelector(".mediaList-by");
+
+			const channelNameElement = channelSection?.querySelector(".mediaList-by-heading");
+			const channelName = channelNameElement?.textContent;
+
+			const [channelLink] = channelSection?.querySelectorAll("a");
+			const channelHref = channelLink?.getAttribute?.("href");
+
+			const channelUrl = asAbsoluteURL(channelHref);
+
+			const channelImage = channelSection?.querySelector("[data-js='user-image']");
+			const channelImageId = getThumbnailId(channelImage);
+			const channelImageUrl = userImages[channelImageId];
+
+			const [liveElement] = item.querySelectorAll(".mediaList-live");
+			const isLive = !!liveElement;
+
+			const [timestampElement] = channelSection?.querySelectorAll(".mediaList-timestamp");
+
+			let uploadDate = 0;
+			if (timestampElement) {
+				uploadDate = extractAgoText_Timestamp(timestampElement.textContent);
+			}
+
+			const video = new PlatformVideo({
+				id: new PlatformID(PLATFORM, id, config.id),
+				name: title?.textContent?.trim() ?? "",
+				thumbnails: new Thumbnails(thumbnails),
+				author: new PlatformAuthorLink(
+					getAuthorIdFromUrl(channelUrl),
+					channelName ?? "",
+					channelUrl ?? "",
+					asAbsoluteURL(channelImageUrl) ?? ""
+				),
+				uploadDate: uploadDate,
+				duration: duration,
+				viewCount: viewCount,
+				url: videoUrl,
+				isLive: isLive
+			});
+
+			relatedVideos.push(video);
+		} catch (e) {
+			log("Error parsing live stream related video " + e);
 		}
 	}
 
