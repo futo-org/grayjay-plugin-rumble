@@ -7,7 +7,7 @@ const URL_BASE_VIDEO = `${URL_BASE}/v`;
 const URL_VIDEO_DETAIL = `${URL_BASE}/embedJS/u3/`;
 const URL_COMMENTS = "https://rumble.com/service.php?name=comment.list&video=";
 const URL_SEARCH_CHANNEL = `${URL_BASE}/search/channel?q=`;
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0';
+const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36';
 
 const REGEX_HUMAN_AGO = new RegExp("([0-9]*) ([a-zA-Z]*) ago");
 const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
@@ -74,7 +74,10 @@ source.enable = function (conf, setts, saveStateStr) {
 	} else if (settings.useIpifyForRNSC) {
 
 		try {
-			const res = http.GET('https://api.ipify.org', {});
+			const res = httpGET({
+				url: 'https://api.ipify.org',
+				headers: {}
+			});	
 			if (res.isOk) {
 				state.defaultHeaders.Cookie = `RNSC=${res.body};`;
 			}
@@ -167,7 +170,7 @@ source.search = function (query, type, order, filters) {
 
 function getChannelsPage(query, page = null) {
 	const url = URL_SEARCH_CHANNEL + query + (page ? `&page=${page}` : "");
-	const res = http.GET(url, state.defaultHeaders);
+	const res = httpGET(url);
 	if (!res.isOk) {
 		return [];
 	}
@@ -274,13 +277,13 @@ source.getChannel = function (url) {
 		}
 	}
 
-	const res = http.GET(aboutTabUrl, state.defaultHeaders);
+	const res = httpGET(aboutTabUrl);
 	if (!res.isOk) {
 
 		if(res.code === 404) {
 			throw new UnavailableException(`Channel not found (${res.code}) for ${url}`);
 		}
-		
+
 		if(res.code === 410) {
 			throw new UnavailableException(`Channel removed (${res.code}) for ${url}`);
 		}
@@ -384,7 +387,7 @@ source.getContentDetails = function (url) {
 	if (isEmbedUrl(url)) {
 		let canonicalUrl;
 
-		const canonicalUrlResolutionRes = http.GET(url, state.defaultHeaders, true);
+		const canonicalUrlResolutionRes = httpGET({ url, useAuthenticated: true });
 		if (canonicalUrlResolutionRes.isOk) {
 			const doc = domParser.parseFromString(canonicalUrlResolutionRes.body, "text/html");
 			canonicalUrl = doc.querySelector("link[rel='canonical']")?.getAttribute("href");
@@ -398,7 +401,7 @@ source.getContentDetails = function (url) {
 		}
 	}
 
-	const res = http.GET(url, state.defaultHeaders, true)
+	const res = httpGET({ url, useAuthenticated: true })
 	if (res.code !== 200) {
 		return null;
 	}
@@ -429,11 +432,15 @@ source.getContentDetails = function (url) {
 	if (vidInfo.show_premium_exclusive_gate) {
 		bridge.toast("Contains premium exclusive section. Subscribe to watch premium content")
 	}
-	const resTracks = http.GET(`${URL_VIDEO_DETAIL}${buildQuery({
-		request: "video",
-		ver: 2,
-		v: vid
-	})}`, {}, true);
+	const resTracks = httpGET({
+		url: `${URL_VIDEO_DETAIL}${buildQuery({
+			request: "video",
+			ver: 2,
+			v: vid
+		})}`,
+		headers: {},
+		useAuthenticated: true
+	});
 
 	if (resTracks.code != 200) {
 		return null;
@@ -556,7 +563,7 @@ source.getContentDetails = function (url) {
 	return videoDetails;
 };
 source.getLiveChatWindow = function (url) {
-	const res = http.GET(url, state.defaultHeaders);
+	const res = httpGET(url);
 	if (res.isOk) {
 		const vid = findVideoIdInteger(res.body);
 
@@ -574,11 +581,11 @@ source.getLiveChatWindow = function (url) {
 };
 source.getComments = function (url) {
 	const comments = [];
-	const res = http.GET(url, state.defaultHeaders, true);
+	const res = httpGET({ url, useAuthenticated: true });
 	let lastCommentPerLevel = {};
 	if (res.isOk) {
 		const vid = findVideoId(res.body).substring(1);
-		const commentsRes = http.GET(URL_COMMENTS + vid, state.defaultHeaders, true);
+		const commentsRes = httpGET({ url: URL_COMMENTS + vid, useAuthenticated: true });
 		if (commentsRes.isOk) {
 			const obj = JSON.parse(commentsRes.body);
 
@@ -660,7 +667,7 @@ source.getUserSubscriptions = function () {
 		return [];
 	}
 
-	const res = http.GET("https://rumble.com/account/channel/subscriptions", state.defaultHeaders, true);
+	const res = httpGET({ url: "https://rumble.com/account/channel/subscriptions", useAuthenticated: true });
 	if (res.code != 200) {
 		bridge.log("Failed to retrieve subscriptions page.");
 		return [];
@@ -717,7 +724,7 @@ class RumbleCommentPager extends CommentPager {
 
 source.getContentRecommendations = function (url, res) {
 	if (!res) {
-		res = http.GET(url, state.defaultHeaders, true);
+		res = httpGET({ url, useAuthenticated: true });
 
 		if (!res.isOk) {
 			return null;
@@ -1181,7 +1188,7 @@ function parseVideoStreams(elements, author) {
  */
 function getVideosPager(url, params, author) {
 
-	const res = http.GET(`${url}${buildQuery(params)}`, state.defaultHeaders);
+	const res = httpGET(`${url}${buildQuery(params)}`);
 
 	if (res.code == 200) {
 		const doc = domParser.parseFromString(res.body, "text/html");
@@ -1507,5 +1514,123 @@ class RumbleChannelPager extends ChannelPager {
 }
 
 //#endregion
+
+/**
+ * Validates if a string is a valid URL
+ * @param {string} str - The string to validate
+ * @returns {boolean} True if the string is a valid URL
+ */
+function isValidUrl(str) {
+	if (typeof str !== 'string') {
+		return false;
+	}
+
+	// Basic URL validation - checks for http:// or https:// and a domain
+	const urlPattern = /^https?:\/\/.+/i;
+	return urlPattern.test(str);
+}
+
+/**
+ * Gets the requested url and returns the response body either as a string or as a parsed json object
+ * @param {Object|string} optionsOrUrl - The options object or URL string
+ * @param {string} optionsOrUrl.url - The URL to call (when using object)
+ * @param {boolean} [optionsOrUrl.useAuthenticated=false] - If true, will use the authenticated headers
+ * @param {boolean} [optionsOrUrl.parseResponse=false] - If true, will parse the response as json and check for errors
+ * @param {number} [optionsOrUrl.retries=5] - Number of retry attempts
+ * @param {Object} [optionsOrUrl.headers=null] - Custom headers to use for the request
+ * @returns {string | Object} the response body as a string or the parsed json object
+ * @throws {ScriptException}
+ */
+function httpGET(optionsOrUrl) {
+	// Check if parameter is a string URL
+	let options;
+	if (typeof optionsOrUrl === 'string') {
+		if (!isValidUrl(optionsOrUrl)) {
+			throw new ScriptException("Invalid URL provided: " + optionsOrUrl);
+		}
+		options = { url: optionsOrUrl };
+	} else if (typeof optionsOrUrl === 'object' && optionsOrUrl !== null) {
+		options = optionsOrUrl;
+	} else {
+		throw new ScriptException("httpGET requires either a URL string or options object");
+	}
+
+	const {
+		url,
+		useAuthenticated = false,
+		parseResponse = false,
+		retries = 5,
+		headers = null
+	} = options;
+
+	if (!url) {
+		throw new ScriptException("URL is required");
+	}
+
+	let lastError;
+	let attempts = retries + 1; // +1 for the initial attempt
+
+	while (attempts > 0) {
+		try {
+			const localHeaders = headers ?? state.defaultHeaders;
+
+			const resp = http.GET(
+				url,
+				localHeaders,
+				useAuthenticated
+			);
+
+			if (!resp.isOk) {
+
+				throwIfCaptcha(resp);
+				
+				throw new ScriptException("Request [" + url + "] failed with code [" + resp.code + "]");
+			}
+
+			if (parseResponse) {
+				const json = JSON.parse(resp.body);
+				if (json.errors) {
+					throw new ScriptException(json.errors[0].message);
+				}
+				return json;
+			}
+
+			return resp;
+		} catch (error) {
+			lastError = error;
+
+			// Don't retry captcha exceptions - they require manual intervention
+			if (error instanceof CaptchaRequiredException) {
+				log(`Captcha detected for request: ${url}`);
+				throw error;
+			}
+
+			attempts--;
+
+			if (attempts > 0) {
+				bridge.sleep(100);
+			}
+
+			if (attempts === 0) {
+				// All retry attempts failed
+				log(`Request failed after ${retries + 1} attempts: ${url}`);
+				log(lastError);
+				throw lastError;
+			}
+		}
+	}
+}
+
+
+function throwIfCaptcha(resp) {
+    if (resp?.body && resp?.code == 403) {
+
+		// Check for Cloudflare captcha
+        if (/Just a moment\.\.\./i.test(resp.body)) {
+            throw new CaptchaRequiredException(resp.url, resp.body);
+        }
+    }
+    return true;
+}
 
 log("LOADED");
