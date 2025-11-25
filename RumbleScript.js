@@ -14,6 +14,8 @@ const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*backgroun
 const REGEX_USER_IMAGE = /user-image--img--id-([0-9a-z]+)/;
 const REGEX_VIDEO_IMAGE_CSS = /.video-item--by-a--([0-9a-z]+)::before\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
 const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
+const REGEX_MEDIALIST_IMAGE_CSS = /\.mediaList-image--id-size-[^-]+-(\d+)\s*\{\s*background-image:\s*url\(([^)]+)\)/g;
+const REGEX_MEDIALIST_IMAGE = /mediaList-image--id-size-[^-]+-(\d+)/;
 const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
 const REGEX_VIDEO_INFO = /Rumble\("play", ({".*?),"api"/
 const REGEX_EMBED_URL = /^https?:\/\/(www\.)?rumble\.com\/embed\//;
@@ -139,6 +141,11 @@ source.getSearchCapabilities = () => {
 	};
 }
 source.search = function (query, type, order, filters) {
+
+	if(query && source.isContentDetailsUrl(query)) {
+		return new ContentPager([source.getContentDetails(query)], false);
+	}
+
 	let sort = order;
 	if (sort === Type.Order.Chronological) {
 		sort = "date";
@@ -747,10 +754,16 @@ source.getContentRecommendations = function (url, res) {
 
 function getVodContentRecommendations(url, res, doc) {
 	const relatedVideos = [];
+	const seenVideoIds = new Set();
 	const userImages = getUserImageList(res.body);
+	const mediaListImages = getMediaListImageList(res.body);
 
-	// Parse related videos from the sidebar (original logic)
-	const mediaListItems = doc.querySelectorAll("aside .mediaList-item") ?? [];
+	// Parse related videos from the sidebar - try aside first, then fall back to mediaList-list container
+	let mediaListItems = doc.querySelectorAll("aside .mediaList-item");
+	if (!mediaListItems || mediaListItems.length === 0) {
+		mediaListItems = doc.querySelectorAll(".mediaList-list.related .mediaList-item");
+	}
+	mediaListItems = mediaListItems ?? [];
 
 	for (let i = 0; i < mediaListItems.length; i++) {
 		try {
@@ -763,10 +776,27 @@ function getVodContentRecommendations(url, res, doc) {
 			const videoUrl = asAbsoluteURL(link.getAttribute("href"));
 			const id = getVideoIdFromUrl(videoUrl);
 
+			// Skip duplicates (can appear from mobile/desktop layout variants)
+			if (seenVideoIds.has(id)) {
+				continue;
+			}
+			seenVideoIds.add(id);
+
 			const img = item.querySelector(".mediaList-image");
 			const thumbnails = [];
 			if (img) {
-				const src = img.getAttribute("src");
+				// First try the src attribute (direct img tag)
+				let src = img.getAttribute("src");
+				
+				// If no src, try to extract from CSS class (SVG with background-image in CSS)
+				if (!src) {
+					const imgClass = img.getAttribute("class") || "";
+					const match = imgClass.match(REGEX_MEDIALIST_IMAGE);
+					if (match && match[1]) {
+						src = mediaListImages[match[1]];
+					}
+				}
+				
 				if (src) {
 					thumbnails.push(new Thumbnail(src, 0));
 				}
@@ -836,10 +866,15 @@ function getVodContentRecommendations(url, res, doc) {
 
 function getLiveContentRecommendations(url, res, doc) {
 	const relatedVideos = [];
+	const seenVideoIds = new Set();
 	const userImages = getUserImageList(res.body);
+	const mediaListImages = getMediaListImageList(res.body);
 
-	// Try main selectors in one call - live streams likely use same structure as VOD
-	const mediaListItems = doc.querySelectorAll("aside .mediaList-item, .live-recommendations .video-item, .mediaList-item");
+	// Try main selectors - live streams use mediaList-list container for related videos
+	let mediaListItems = doc.querySelectorAll(".mediaList-list.related .mediaList-item");
+	if (!mediaListItems || mediaListItems.length === 0) {
+		mediaListItems = doc.querySelectorAll("aside .mediaList-item, .live-recommendations .video-item, .mediaList-item");
+	}
 
 	for (let i = 0; i < mediaListItems.length; i++) {
 		try {
@@ -854,10 +889,27 @@ function getLiveContentRecommendations(url, res, doc) {
 			const videoUrl = asAbsoluteURL(link.getAttribute("href"));
 			const id = getVideoIdFromUrl(videoUrl);
 
+			// Skip duplicates (can appear from mobile/desktop layout variants)
+			if (seenVideoIds.has(id)) {
+				continue;
+			}
+			seenVideoIds.add(id);
+
 			const img = item.querySelector(".mediaList-image");
 			const thumbnails = [];
 			if (img) {
-				const src = img.getAttribute("src");
+				// First try the src attribute (direct img tag)
+				let src = img.getAttribute("src");
+				
+				// If no src, try to extract from CSS class (SVG with background-image in CSS)
+				if (!src) {
+					const imgClass = img.getAttribute("class") || "";
+					const match = imgClass.match(REGEX_MEDIALIST_IMAGE);
+					if (match && match[1]) {
+						src = mediaListImages[match[1]];
+					}
+				}
+				
 				if (src) {
 					thumbnails.push(new Thumbnail(src, 0));
 				}
@@ -1031,6 +1083,19 @@ function getUserImageList(src) {
 		userImages[userImage[1]] = userImage[2];
 	}
 	return userImages;
+}
+
+/**
+ * Gets a map of mediaList thumbnail images from CSS background-image declarations
+ * @param {String} src The source
+ * @returns {Map<String, String>} A mediaList image map (video ID to thumbnail URL)
+ */
+function getMediaListImageList(src) {
+	const mediaListImages = {};
+	for (const match of src.matchAll(REGEX_MEDIALIST_IMAGE_CSS)) {
+		mediaListImages[match[1]] = match[2];
+	}
+	return mediaListImages;
 }
 
 /**
