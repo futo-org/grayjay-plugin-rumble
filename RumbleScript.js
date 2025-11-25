@@ -139,6 +139,11 @@ source.getSearchCapabilities = () => {
 	};
 }
 source.search = function (query, type, order, filters) {
+
+	if(query && source.isContentDetailsUrl(query)) {
+		return new ContentPager([source.getContentDetails(query)], false);
+	}
+
 	let sort = order;
 	if (sort === Type.Order.Chronological) {
 		sort = "date";
