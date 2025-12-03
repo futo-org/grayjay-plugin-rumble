@@ -21,6 +21,79 @@ const REGEX_VIDEO_INFO = /Rumble\("play", ({".*?),"api"/
 const REGEX_EMBED_URL = /^https?:\/\/(www\.)?rumble\.com\/embed\//;
 const REGEX_CHANNEL_URL = /^https:\/\/rumble\.com\/[a-zA-Z0-9_-]+\/?(?:\?.*)?$/;
 
+// HTML entity map for decoding HTML entities in strings
+const HTML_NAMED_ENTITIES = {
+	'&amp;': '&',
+	'&lt;': '<',
+	'&gt;': '>',
+	'&quot;': '"',
+	'&apos;': "'",
+	'&nbsp;': '\u00A0',
+	'&iexcl;': '\u00A1',
+	'&cent;': '\u00A2',
+	'&pound;': '\u00A3',
+	'&curren;': '\u00A4',
+	'&yen;': '\u00A5',
+	'&brvbar;': '\u00A6',
+	'&sect;': '\u00A7',
+	'&uml;': '\u00A8',
+	'&copy;': '\u00A9',
+	'&ordf;': '\u00AA',
+	'&laquo;': '\u00AB',
+	'&not;': '\u00AC',
+	'&shy;': '\u00AD',
+	'&reg;': '\u00AE',
+	'&macr;': '\u00AF',
+	'&deg;': '\u00B0',
+	'&plusmn;': '\u00B1',
+	'&sup2;': '\u00B2',
+	'&sup3;': '\u00B3',
+	'&acute;': '\u00B4',
+	'&micro;': '\u00B5',
+	'&para;': '\u00B6',
+	'&middot;': '\u00B7',
+	'&cedil;': '\u00B8',
+	'&sup1;': '\u00B9',
+	'&ordm;': '\u00BA',
+	'&raquo;': '\u00BB',
+	'&frac14;': '\u00BC',
+	'&frac12;': '\u00BD',
+	'&frac34;': '\u00BE',
+	'&iquest;': '\u00BF',
+	'&times;': '\u00D7',
+	'&divide;': '\u00F7',
+	'&ndash;': '\u2013',
+	'&mdash;': '\u2014',
+	'&lsquo;': '\u2018',
+	'&rsquo;': '\u2019',
+	'&sbquo;': '\u201A',
+	'&ldquo;': '\u201C',
+	'&rdquo;': '\u201D',
+	'&bdquo;': '\u201E',
+	'&dagger;': '\u2020',
+	'&Dagger;': '\u2021',
+	'&bull;': '\u2022',
+	'&hellip;': '\u2026',
+	'&permil;': '\u2030',
+	'&prime;': '\u2032',
+	'&Prime;': '\u2033',
+	'&lsaquo;': '\u2039',
+	'&rsaquo;': '\u203A',
+	'&oline;': '\u203E',
+	'&frasl;': '\u2044',
+	'&euro;': '\u20AC',
+	'&trade;': '\u2122',
+	'&larr;': '\u2190',
+	'&uarr;': '\u2191',
+	'&rarr;': '\u2192',
+	'&darr;': '\u2193',
+	'&harr;': '\u2194',
+	'&spades;': '\u2660',
+	'&clubs;': '\u2663',
+	'&hearts;': '\u2665',
+	'&diams;': '\u2666'
+};
+
 const PLATFORM = "Rumble";
 const PLATFORM_CLAIMTYPE = 4;
 
@@ -545,7 +618,7 @@ source.getContentDetails = function (url) {
 
 	const videoDetails = new PlatformVideoDetails({
 		id: new PlatformID(PLATFORM, id, config.id),
-		name: videoDetail.title ?? "",
+		name: decodeHtmlEntities(videoDetail.title) ?? "",
 		thumbnails: new Thumbnails(thumbnails),
 		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref.getAttribute("href")),
 		videoDetail.author.name ?? "",
@@ -840,7 +913,7 @@ function getVodContentRecommendations(url, res, doc) {
 
 			const video = new PlatformVideo({
 				id: new PlatformID(PLATFORM, id, config.id),
-				name: title?.textContent?.trim() ?? "",
+				name: decodeHtmlEntities(title?.textContent?.trim()) ?? "",
 				thumbnails: new Thumbnails(thumbnails),
 				author: new PlatformAuthorLink(
 					getAuthorIdFromUrl(channelUrl),
@@ -953,7 +1026,7 @@ function getLiveContentRecommendations(url, res, doc) {
 
 			const video = new PlatformVideo({
 				id: new PlatformID(PLATFORM, id, config.id),
-				name: title?.textContent?.trim() ?? "",
+				name: decodeHtmlEntities(title?.textContent?.trim()) ?? "",
 				thumbnails: new Thumbnails(thumbnails),
 				author: new PlatformAuthorLink(
 					getAuthorIdFromUrl(channelUrl),
@@ -1143,7 +1216,7 @@ function parseVideoListingEntry(authorImages, e) {
 
 	return new PlatformVideo({
 		id: new PlatformID(PLATFORM, id, config.id),
-		name: title?.textContent ?? "",
+		name: decodeHtmlEntities(title?.textContent) ?? "",
 		thumbnails: new Thumbnails(thumbnails),
 		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref),
 			author?.textContent,
@@ -1199,7 +1272,7 @@ function parseVideoStream(e, author) {
 
 	return new PlatformVideo({
 		id: new PlatformID(PLATFORM, id, config.id),
-		name: title?.textContent ?? "",
+		name: decodeHtmlEntities(title?.textContent) ?? "",
 		thumbnails: new Thumbnails(thumbnails),
 		author: author,
 		uploadDate: dateToUnixTime(time?.getAttribute("datetime")),
@@ -1388,6 +1461,33 @@ function fromHumanNumber(numStr) {
 	}
 
 	return Math.round(num);
+}
+
+/**
+ * Decode HTML entities in a string
+ * @param {String?} str String with HTML entities
+ * @returns {String} Decoded string
+ */
+function decodeHtmlEntities(str) {
+	if (!str) {
+		return str;
+	}
+	
+	// First, decode numeric character references (&#123; or &#x1F; format)
+	let result = str.replace(/&#(\d+);/g, (match, dec) => {
+		return String.fromCodePoint(parseInt(dec, 10));
+	});
+	
+	result = result.replace(/&#[xX]([0-9a-fA-F]+);/g, (match, hex) => {
+		return String.fromCodePoint(parseInt(hex, 16));
+	});
+	
+	// Then decode named entities
+	for (const [entity, char] of Object.entries(HTML_NAMED_ENTITIES)) {
+		result = result.split(entity).join(char);
+	}
+	
+	return result;
 }
 
 /**
