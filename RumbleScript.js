@@ -696,7 +696,7 @@ source.getComments = function (url) {
 				const time = firstByClassOrNull(e, "comments-meta-post-time");
 				const text = firstByClassOrNull(e, "comment-text");
 				const thumbnail = firstByClassOrNull(e, "user-image--img");
-				const like_count = parseInt(firstByClassOrNull(e, "rumbles-count").textContent)
+				const like_count = parseInt(firstByClassOrNull(e, "rumbles-count")?.textContent ?? '0')
 
 				const authorThumbnailUrl = userImages[getThumbnailId(thumbnail)];
 				const replyCount = e.getAttribute("data-num-replies");
