@@ -102,7 +102,7 @@
 			"Fix: Recommended videos thumbnails;"
 		],
 		"61": [
-			"Improvement: Add HTML entity decoding function and map;",
+			"Improvement: Special characters (HTML entities) now render properly video titles;",
 			"Fix: Comments errors;"
 		]
 	}
