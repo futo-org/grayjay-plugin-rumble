@@ -63,7 +63,13 @@
 			"cf_clearance"
 		]
 	},
-
+    "captchaDesktop": {
+        "captchaUrl": null,
+        "cookiesToFind": [
+            "cf_clearance"
+        ],
+        "useMobileEmulation": false
+    },
 	"supportedClaimTypes": [4],
 	"changelog": {
 		"52" : [
