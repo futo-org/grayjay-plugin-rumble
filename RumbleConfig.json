@@ -63,13 +63,14 @@
 			"cf_clearance"
 		]
 	},
-    "captchaDesktop": {
-        "captchaUrl": null,
-        "cookiesToFind": [
-            "cf_clearance"
-        ],
-        "useMobileEmulation": false
-    },
+	"captchaDesktop": {
+		"userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+		"captchaUrl": null,
+		"cookiesToFind": [
+			"cf_clearance"
+		],
+		"useMobileEmulation": false
+	},
 	"supportedClaimTypes": [4],
 	"changelog": {
 		"52" : [
