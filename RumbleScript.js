@@ -1,3 +1,4 @@
+const IS_DESKTOP = bridge.buildPlatform === "desktop";
 const URL_BASE = "https://rumble.com";
 const URL_VIDEOS = `${URL_BASE}/videos`;
 const URL_SEARCH = `${URL_BASE}/search/video`;
@@ -7,7 +8,7 @@ const URL_BASE_VIDEO = `${URL_BASE}/v`;
 const URL_VIDEO_DETAIL = `${URL_BASE}/embedJS/u3/`;
 const URL_COMMENTS = "https://rumble.com/service.php?name=comment.list&video=";
 const URL_SEARCH_CHANNEL = `${URL_BASE}/search/channel?q=`;
-const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36';
+const USER_AGENT = IS_DESKTOP ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' : 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36';
 
 const REGEX_HUMAN_AGO = new RegExp("([0-9]*) ([a-zA-Z]*) ago");
 const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
@@ -1724,7 +1725,7 @@ function httpGET(optionsOrUrl) {
 		url,
 		useAuthenticated = false,
 		parseResponse = false,
-		retries = 5,
+		retries = 1,
 		headers = null
 	} = options;
 
