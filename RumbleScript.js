@@ -10,7 +10,8 @@ const URL_SEARCH_CHANNEL = `${URL_BASE}/search/channel?q=`;
 const IS_DESKTOP = bridge.buildPlatform === "desktop";
 const USER_AGENT_MOBILE = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36';
 const USER_AGENT_DESKTOP = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
-const USER_AGENT = IS_DESKTOP ? USER_AGENT_DESKTOP : USER_AGENT_MOBILE;
+const USER_AGENT_FALLBACK = IS_DESKTOP ? USER_AGENT_DESKTOP : USER_AGENT_MOBILE;
+const getUserAgent = () => bridge.authUserAgent ?? bridge.captchaUserAgent ?? USER_AGENT_FALLBACK;
 
 const REGEX_HUMAN_AGO = new RegExp("([0-9]*) ([a-zA-Z]*) ago");
 const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
@@ -108,7 +109,7 @@ const isAndroid = bridge.buildPlatform === "android";
 
 let state = {
 	defaultHeaders: {
-		'User-Agent': USER_AGENT,
+		'User-Agent': getUserAgent(),
 	}
 };
 
