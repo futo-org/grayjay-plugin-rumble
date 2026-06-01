@@ -52,7 +52,7 @@
 	
 	"authentication": {
 		"loginUrl": "https://rumble.com/login.php",
-		"userAgent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36",
+		"userAgent": null,
 		"cookiesToFind": [ "u_s" ]
 	},
 
@@ -64,7 +64,7 @@
     },
 
 	"captcha": {
-		"userAgent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36",
+		"userAgent": null,
 		"captchaUrl": null,
 		"cookiesToFind": [
 			"cf_clearance"
