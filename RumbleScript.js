@@ -691,7 +691,6 @@ source.getComments = function (url) {
 				const likeCount = parseInt(firstByClassOrNull(e, "rumbles-count")?.textContent ?? '0');
 
 				const authorThumbnailUrl = userImages[getThumbnailId(thumbnail)];
-				const replyCountAttr = e.getAttribute("data-num-replies");
 
 				// Depth from parent <ul class="comments-N"> (N=1 is top level).
 				let depth = 0;
@@ -711,7 +710,6 @@ source.getComments = function (url) {
 					authorThumbnail: asAbsoluteURL(authorThumbnailUrl) ?? "",
 					message: text?.textContent ?? "",
 					date: extractAgoText_Timestamp(time?.textContent),
-					replyCount: replyCountAttr != null ? parseInt(replyCountAttr) : 0,
 					likeCount: isNaN(likeCount) ? 0 : likeCount,
 					replies: []
 				};
@@ -1563,7 +1561,7 @@ function rumbleCommentFromNode(node, contextUrl) {
 		),
 		message: node.message ?? "",
 		date: Number.isFinite(node.date) ? node.date : 0,
-		replyCount: Number.isFinite(node.replyCount) ? node.replyCount : 0,
+		replyCount: Array.isArray(node.replies) ? node.replies.length : 0,
 		rating: new RatingLikes(Number.isFinite(node.likeCount) ? node.likeCount : 0),
 		// context is a native Map<String,String> - stringify the reply subtree.
 		context: { replies: JSON.stringify(node.replies ?? []) }
