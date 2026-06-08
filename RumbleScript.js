@@ -755,6 +755,12 @@ source.getUserSubscriptions = function () {
 	const channelUrls = [];
 	const doc = domParser.parseFromString(res.body, "text/html");
 	const tables = doc.getElementsByTagName("table");
+	if (tables.length === 0) {
+		// No subscriptions table - happens when the auth cookie is stale (Rumble
+		// serves an auth wall) or the page markup changed. Fail gracefully.
+		bridge.log("Failed to parse subscriptions page (no table found).");
+		return [];
+	}
 	const aElements = tables[0].getElementsByTagName("a");
 
 	for (let i = 0; i < aElements.length; i++) {
