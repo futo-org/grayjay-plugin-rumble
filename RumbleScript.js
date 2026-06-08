@@ -15,8 +15,6 @@ const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*backgroun
 const REGEX_USER_IMAGE = /user-image--img--id-([0-9a-z]+)/;
 const REGEX_VIDEO_IMAGE_CSS = /.video-item--by-a--([0-9a-z]+)::before\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
 const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
-const REGEX_MEDIALIST_IMAGE_CSS = /\.mediaList-image--id-size-[^-]+-(\d+)\s*\{\s*background-image:\s*url\(([^)]+)\)/g;
-const REGEX_MEDIALIST_IMAGE = /mediaList-image--id-size-[^-]+-(\d+)/;
 const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
 const REGEX_VIDEO_INFO = /Rumble\("play", ({".*?),"api"/
 const REGEX_EMBED_URL = /^https?:\/\/(www\.)?rumble\.com\/embed\//;
@@ -661,9 +659,9 @@ source.getLiveChatWindow = function (url) {
 	}
 };
 source.getComments = function (url) {
-	const comments = [];
+	const rootNodes = [];
 	const res = httpGET({ url, useAuthenticated: true });
-	let lastCommentPerLevel = {};
+	const lastNodePerLevel = {};
 	if (res.isOk) {
 		const vid = findVideoId(res.body).substring(1);
 		const commentsRes = httpGET({ url: URL_COMMENTS + vid, useAuthenticated: true });
@@ -681,15 +679,8 @@ source.getComments = function (url) {
 				/** @type {Element} */
 				const e = elements[i];
 
-				let isCreate = false;
-				for (let i = 0; i < e.classList.length; i++) {
-					if (e.classList[i] === "comments-create") {
-						isCreate = true;
-						break;
-					}
-				}
-
-				if (isCreate) {
+				const classAttr = e.getAttribute("class") ?? "";
+				if (classAttr.split(/\s+/).includes("comments-create")) {
 					continue;
 				}
 
@@ -697,48 +688,74 @@ source.getComments = function (url) {
 				const time = firstByClassOrNull(e, "comments-meta-post-time");
 				const text = firstByClassOrNull(e, "comment-text");
 				const thumbnail = firstByClassOrNull(e, "user-image--img");
-				const like_count = parseInt(firstByClassOrNull(e, "rumbles-count")?.textContent ?? '0')
+				const likeCount = parseInt(firstByClassOrNull(e, "rumbles-count")?.textContent ?? '0');
 
 				const authorThumbnailUrl = userImages[getThumbnailId(thumbnail)];
-				const replyCount = e.getAttribute("data-num-replies");
 
+				// Depth from parent <ul class="comments-N"> (N=1 is top level).
 				let depth = 0;
-				const match = e.parentNode?.className.match(/^comments-(\d+)$/);
+				const parentClass = e.parentNode?.getAttribute?.("class") ?? "";
+				const match = parentClass.match(/^comments-(\d+)$/);
 				if (match) {
-					depth = parseInt(match[1]);
-
-					if (isNaN(depth)) {
-						depth = 0;
-					} else {
-						depth = depth - 1;
-					}
+					const level = parseInt(match[1]);
+					depth = isNaN(level) ? 0 : Math.max(0, level - 1);
 				}
 
 				const authorHref = asAbsoluteURL(author?.getAttribute("href"));
-				const c = new RumbleComment({
-					contextUrl: url,
-					author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref),
-						author.textContent ?? "",
-						asAbsoluteURL(authorHref),
-						asAbsoluteURL(authorThumbnailUrl) ?? ""),
+
+				const node = {
+					authorName: author?.textContent ?? "",
+					authorUrl: authorHref ?? "",
+					authorUsername: e.getAttribute("data-username") ?? "",
+					authorThumbnail: asAbsoluteURL(authorThumbnailUrl) ?? "",
 					message: text?.textContent ?? "",
 					date: extractAgoText_Timestamp(time?.textContent),
-					replyCount: replyCount != null ? parseInt(replyCount) : 0,
-					replies: [],
-					rating: new RatingLikes(like_count)
-				});
+					likeCount: isNaN(likeCount) ? 0 : likeCount,
+					replies: []
+				};
 
-				lastCommentPerLevel[depth] = c;
-
-				if (depth == 0) {
-					comments.push(c);
+				lastNodePerLevel[depth] = node;
+				if (depth === 0) {
+					rootNodes.push(node);
+				} else if (lastNodePerLevel[depth - 1]) {
+					lastNodePerLevel[depth - 1].replies.push(node);
 				} else {
-					lastCommentPerLevel[depth - 1].replies.push(c);
+					rootNodes.push(node); // orphan reply - surface rather than drop
 				}
 			}
 		}
 	}
 
+	const comments = rootNodes.map(n => rumbleCommentFromNode(n, url));
+	return new RumbleCommentPager(comments, 20);
+}
+
+source.getSubComments = function (comment) {
+
+	if (typeof comment === "string") {
+		try {
+			comment = JSON.parse(comment);
+		} catch (e) {
+			bridge.log("getSubComments: failed to parse comment - " + e);
+			return new CommentPager([], false);
+		}
+	}
+
+	// context.replies is a JSON string (context is a native Map<String,String>).
+	let replies = [];
+	const raw = comment?.context?.replies;
+	if (typeof raw === "string" && raw.length > 0) {
+		try {
+			replies = JSON.parse(raw);
+		} catch (e) {
+			bridge.log("getSubComments: failed to parse replies - " + e);
+		}
+	} else if (Array.isArray(raw)) {
+		replies = raw;
+	}
+
+	const contextUrl = comment?.contextUrl ?? "";
+	const comments = replies.map(n => rumbleCommentFromNode(n, contextUrl));
 	return new RumbleCommentPager(comments, 20);
 }
 
@@ -757,6 +774,11 @@ source.getUserSubscriptions = function () {
 	const channelUrls = [];
 	const doc = domParser.parseFromString(res.body, "text/html");
 	const tables = doc.getElementsByTagName("table");
+	if (tables.length === 0) {
+		// No table - usually a stale-auth wall. Fail gracefully instead of crashing.
+		bridge.log("Failed to parse subscriptions page (no table found).");
+		return [];
+	}
 	const aElements = tables[0].getElementsByTagName("a");
 
 	for (let i = 0; i < aElements.length; i++) {
@@ -796,9 +818,9 @@ class RumbleCommentPager extends CommentPager {
 
 	nextPage() {
 		const end = Math.min(this.offset + this.pageSize, this.allResults.length);
-		this.results = this.allResults.slice(this.offset, end - this.offset);
+		this.results = this.allResults.slice(this.offset, end);
 		this.offset = end;
-		this.hasMore = this.offset + this.pageSize < this.allResults.length;
+		this.hasMore = this.offset < this.allResults.length;
 		return this;
 	}
 }
@@ -812,243 +834,37 @@ source.getContentRecommendations = function (url, res) {
 		}
 	}
 
-	const doc = domParser.parseFromString(res.body, "text/html");
-
-	// Detect if this is a live stream page
-	const liveHeaderInfo = doc.getElementsByClassName("video-header-live-info");
-	const isLiveStreamPage = liveHeaderInfo.length > 0 && liveHeaderInfo[0].getElementsByClassName("live-video-view-count-status").length > 0;
-
-	// Route to appropriate specialized function
-	if (isLiveStreamPage) {
-		return getLiveContentRecommendations(url, res, doc);
-	} else {
-		return getVodContentRecommendations(url, res, doc);
+	// Related videos come from the video.autoplay endpoint (not the page HTML).
+	const vid = findVideoIdInteger(res.body);
+	if (!vid) {
+		return new VideoPager([], false);
 	}
-};
 
-function getVodContentRecommendations(url, res, doc) {
-	const relatedVideos = [];
-	const seenVideoIds = new Set();
-	const userImages = getUserImageList(res.body);
-	const mediaListImages = getMediaListImageList(res.body);
-
-	// Parse related videos from the sidebar - try aside first, then fall back to mediaList-list container
-	let mediaListItems = doc.querySelectorAll("aside .mediaList-item");
-	if (!mediaListItems || mediaListItems.length === 0) {
-		mediaListItems = doc.querySelectorAll(".mediaList-list.related .mediaList-item");
+	const recRes = httpGET(`${URL_BASE}/service.php?api=7&options=video.full&video_id=${vid}&name=video.autoplay`);
+	if (!recRes.isOk) {
+		return new VideoPager([], false);
 	}
-	mediaListItems = mediaListItems ?? [];
 
-	for (let i = 0; i < mediaListItems.length; i++) {
-		try {
-			const item = mediaListItems[i];
-			const link = item.querySelector(".mediaList-link");
-			if (!link) {
-				continue;
-			}
+	let data;
+	try {
+		data = JSON.parse(recRes.body);
+	} catch (e) {
+		log("Error parsing content recommendations " + e);
+		return new VideoPager([], false);
+	}
 
-			const videoUrl = asAbsoluteURL(link.getAttribute("href"));
-			const id = getVideoIdFromUrl(videoUrl);
-
-			// Skip duplicates (can appear from mobile/desktop layout variants)
-			if (seenVideoIds.has(id)) {
-				continue;
-			}
-			seenVideoIds.add(id);
-
-			const img = item.querySelector(".mediaList-image");
-			const thumbnails = [];
-			if (img) {
-				// First try the src attribute (direct img tag)
-				let src = img.getAttribute("src");
-				
-				// If no src, try to extract from CSS class (SVG with background-image in CSS)
-				if (!src) {
-					const imgClass = img.getAttribute("class") || "";
-					const match = imgClass.match(REGEX_MEDIALIST_IMAGE);
-					if (match && match[1]) {
-						src = mediaListImages[match[1]];
-					}
-				}
-				
-				if (src) {
-					thumbnails.push(new Thumbnail(src, 0));
-				}
-			}
-
-			const title = item.querySelector(".mediaList-heading");
-
-			const durationElement = item.querySelector(".mediaList-duration");
-			const duration = hhmmssToDuration(durationElement?.textContent);
-
-			const viewsElement = item.querySelector(".video-counters--item.video-item--views");
-			let viewCount = 0;
-			if (viewsElement) {
-				const viewText = viewsElement?.textContent?.trim() ?? "";
-				viewCount = fromHumanNumber(viewText) || 0;
-			}
-
-			const channelSection = item.querySelector(".mediaList-by");
-
-			const channelNameElement = channelSection?.querySelector(".mediaList-by-heading");
-			const channelName = channelNameElement?.textContent;
-
-			const [channelLink] = channelSection?.querySelectorAll("a");
-			const channelHref = channelLink?.getAttribute?.("href");
-
-			const channelUrl = asAbsoluteURL(channelHref);
-
-			const channelImage = channelSection?.querySelector("[data-js='user-image']");
-			const channelImageId = getThumbnailId(channelImage);
-			const channelImageUrl = userImages[channelImageId];
-
-			const [liveElement] = item.querySelectorAll(".mediaList-live");
-			const isLive = !!liveElement;
-
-			const [timestampElement] = item.querySelectorAll(".mediaList-timestamp");
-
-			let uploadDate = 0;
-			if (timestampElement) {
-				uploadDate = extractAgoText_Timestamp(timestampElement.textContent);
-			}
-
-			const video = new PlatformVideo({
-				id: new PlatformID(PLATFORM, id, config.id),
-				name: decodeHtmlEntities(title?.textContent?.trim()) ?? "",
-				thumbnails: new Thumbnails(thumbnails),
-				author: new PlatformAuthorLink(
-					getAuthorIdFromUrl(channelUrl),
-					channelName ?? "",
-					channelUrl ?? "",
-					asAbsoluteURL(channelImageUrl) ?? ""
-				),
-				uploadDate: uploadDate,
-				duration: duration,
-				viewCount: viewCount,
-				url: videoUrl,
-				isLive: isLive
-			});
-
-			relatedVideos.push(video);
-		} catch (e) {
-			log("Error parsing related video " + e);
+	const items = data?.data?.videos ?? [];
+	const results = [];
+	const seen = new Set();
+	for (const item of items) {
+		if (item.object_type !== "video" || !item.url || seen.has(item.url)) {
+			continue;
 		}
+		seen.add(item.url);
+		results.push(parseChannelJsonVideo(item, null));
 	}
 
-	return new VideoPager(relatedVideos, false);
-};
-
-function getLiveContentRecommendations(url, res, doc) {
-	const relatedVideos = [];
-	const seenVideoIds = new Set();
-	const userImages = getUserImageList(res.body);
-	const mediaListImages = getMediaListImageList(res.body);
-
-	// Try main selectors - live streams use mediaList-list container for related videos
-	let mediaListItems = doc.querySelectorAll(".mediaList-list.related .mediaList-item");
-	if (!mediaListItems || mediaListItems.length === 0) {
-		mediaListItems = doc.querySelectorAll("aside .mediaList-item, .live-recommendations .video-item, .mediaList-item");
-	}
-
-	for (let i = 0; i < mediaListItems.length; i++) {
-		try {
-			const item = mediaListItems[i];
-
-			// Use same selectors as VOD since live streams likely use same structure
-			const link = item.querySelector(".mediaList-link");
-			if (!link) {
-				continue;
-			}
-
-			const videoUrl = asAbsoluteURL(link.getAttribute("href"));
-			const id = getVideoIdFromUrl(videoUrl);
-
-			// Skip duplicates (can appear from mobile/desktop layout variants)
-			if (seenVideoIds.has(id)) {
-				continue;
-			}
-			seenVideoIds.add(id);
-
-			const img = item.querySelector(".mediaList-image");
-			const thumbnails = [];
-			if (img) {
-				// First try the src attribute (direct img tag)
-				let src = img.getAttribute("src");
-				
-				// If no src, try to extract from CSS class (SVG with background-image in CSS)
-				if (!src) {
-					const imgClass = img.getAttribute("class") || "";
-					const match = imgClass.match(REGEX_MEDIALIST_IMAGE);
-					if (match && match[1]) {
-						src = mediaListImages[match[1]];
-					}
-				}
-				
-				if (src) {
-					thumbnails.push(new Thumbnail(src, 0));
-				}
-			}
-
-			const title = item.querySelector(".mediaList-heading");
-
-			const durationElement = item.querySelector(".mediaList-duration");
-			const duration = hhmmssToDuration(durationElement?.textContent);
-
-			const viewsElement = item.querySelector(".video-counters--item.video-item--views");
-			let viewCount = 0;
-			if (viewsElement) {
-				const viewText = viewsElement?.textContent?.trim() ?? "";
-				viewCount = fromHumanNumber(viewText) || 0;
-			}
-
-			const channelSection = item.querySelector(".mediaList-by");
-
-			const channelNameElement = channelSection?.querySelector(".mediaList-by-heading");
-			const channelName = channelNameElement?.textContent;
-
-			const [channelLink] = channelSection?.querySelectorAll("a");
-			const channelHref = channelLink?.getAttribute?.("href");
-
-			const channelUrl = asAbsoluteURL(channelHref);
-
-			const channelImage = channelSection?.querySelector("[data-js='user-image']");
-			const channelImageId = getThumbnailId(channelImage);
-			const channelImageUrl = userImages[channelImageId];
-
-			const [liveElement] = item.querySelectorAll(".mediaList-live");
-			const isLive = !!liveElement;
-
-			const [timestampElement] = channelSection?.querySelectorAll(".mediaList-timestamp");
-
-			let uploadDate = 0;
-			if (timestampElement) {
-				uploadDate = extractAgoText_Timestamp(timestampElement.textContent);
-			}
-
-			const video = new PlatformVideo({
-				id: new PlatformID(PLATFORM, id, config.id),
-				name: decodeHtmlEntities(title?.textContent?.trim()) ?? "",
-				thumbnails: new Thumbnails(thumbnails),
-				author: new PlatformAuthorLink(
-					getAuthorIdFromUrl(channelUrl),
-					channelName ?? "",
-					channelUrl ?? "",
-					asAbsoluteURL(channelImageUrl) ?? ""
-				),
-				uploadDate: uploadDate,
-				duration: duration,
-				viewCount: viewCount,
-				url: videoUrl,
-				isLive: isLive
-			});
-
-			relatedVideos.push(video);
-		} catch (e) {
-			log("Error parsing live stream related video " + e);
-		}
-	}
-
-	return new VideoPager(relatedVideos, false);
+	return new VideoPager(results, false);
 };
 
 //#endregion
@@ -1157,19 +973,6 @@ function getUserImageList(src) {
 		userImages[userImage[1]] = userImage[2];
 	}
 	return userImages;
-}
-
-/**
- * Gets a map of mediaList thumbnail images from CSS background-image declarations
- * @param {String} src The source
- * @returns {Map<String, String>} A mediaList image map (video ID to thumbnail URL)
- */
-function getMediaListImageList(src) {
-	const mediaListImages = {};
-	for (const match of src.matchAll(REGEX_MEDIALIST_IMAGE_CSS)) {
-		mediaListImages[match[1]] = match[2];
-	}
-	return mediaListImages;
 }
 
 /**
@@ -1319,6 +1122,85 @@ function parseVideoStreams(elements, author) {
 }
 
 /**
+ * Parse Rumble channel/user page embedded JSON video feeds.
+ * Channel grids are rendered client-side from <script type="application/json">
+ * blobs of the form { items: [...] } instead of server-side video HTML.
+ * @param {String} src raw page body
+ * @param {PlatformAuthorLink?} author channel author to attach to each video
+ * @returns {PlatformVideo[]}
+ */
+function parseChannelJsonVideos(src, author) {
+	const results = [];
+	const seen = new Set();
+	const re = /<script\s+type="application\/json">/gi;
+	let m;
+	while ((m = re.exec(src))) {
+		const start = src.indexOf(">", m.index) + 1;
+		const end = src.indexOf("</script>", start);
+		if (end < 0) {
+			continue;
+		}
+
+		let data;
+		try {
+			data = JSON.parse(src.substring(start, end).trim());
+		} catch (e) {
+			continue;
+		}
+
+		if (!data || !Array.isArray(data.items)) {
+			continue;
+		}
+
+		for (const item of data.items) {
+			if (item.object_type !== "video" || !item.url || seen.has(item.url)) {
+				continue;
+			}
+			seen.add(item.url);
+			results.push(parseChannelJsonVideo(item, author));
+		}
+	}
+
+	return results;
+}
+
+/**
+ * Build a PlatformVideo from a Rumble channel JSON feed item.
+ * @param {Object} item
+ * @param {PlatformAuthorLink?} author
+ * @returns {PlatformVideo}
+ */
+function parseChannelJsonVideo(item, author) {
+	const thumbnails = [];
+	if (item.thumb) {
+		thumbnails.push(new Thumbnail(item.thumb, 0));
+	}
+
+	let videoAuthor = author;
+	if (!videoAuthor && item.by) {
+		const by = item.by;
+		videoAuthor = new PlatformAuthorLink(
+			getAuthorIdFromUrl(by.relative_url ?? by.url),
+			by.name,
+			by.url ?? asAbsoluteURL(by.relative_url),
+			by.thumb ?? ""
+		);
+	}
+
+	return new PlatformVideo({
+		id: new PlatformID(PLATFORM, getVideoIdFromUrl(item.url), config.id),
+		name: decodeHtmlEntities(item.title) ?? "",
+		thumbnails: new Thumbnails(thumbnails),
+		author: videoAuthor,
+		uploadDate: dateToUnixTime(item.upload_date),
+		duration: item.duration ?? 0,
+		viewCount: item.views ?? 0,
+		url: item.url,
+		isLive: item.live ? true : false
+	});
+}
+
+/**
  * Retrieves the videos pager for a specific page
  * @param {String} url The base URL
  * @param {{[key: string]: any}} params Query parameters
@@ -1343,6 +1225,11 @@ function getVideosPager(url, params, author) {
 		{
 			const elements = doc.querySelectorAll(".thumbnail__grid .videostream");
 			const r = parseVideoStreams(elements, author);
+			results.push(...r);
+		}
+
+		{
+			const r = parseChannelJsonVideos(res.body, author);
 			results.push(...r);
 		}
 
@@ -1389,7 +1276,9 @@ function findVideoId(text) {
  * @param {String} text
  */
 function findVideoIdInteger(text) {
-	const vidMatch = text.match(/video_id:\s(.*?),/);
+	// Live pages embed `video_id: 12345,` (player config) while VOD pages embed
+	// `video_id": "12345"` (HTML attribute) - match both numeric forms.
+	const vidMatch = text.match(/video_id"?\s*:\s*"?(\d+)/);
 	const vid = vidMatch ? vidMatch[1] : null;
 	return vid;
 }
@@ -1643,15 +1532,40 @@ function isEmbedUrl(url) {
 	return REGEX_EMBED_URL.test(url);
 }
 
-class RumbleComment extends Comment {
-	constructor(obj) {
-		super(obj);
-		this.replies = obj.replies;
+// Author id from the always-present data-username (the href can be missing); the
+// href only selects the /c/ vs /user/ claim field type.
+function getCommentAuthorId(node) {
+	let path = node.authorUrl ?? "";
+	if (path.startsWith("https://rumble.com")) {
+		path = path.substring("https://rumble.com".length);
+	}
+	if (path.startsWith("http://rumble.com")) {
+		path = path.substring("http://rumble.com".length);
 	}
 
-	getReplies() {
-		return new RumbleCommentPager(this.replies, 20);
+	const username = node.authorUsername || node.authorName || "";
+	if (path.startsWith("/c/")) {
+		return new PlatformID(PLATFORM, username || path.substring("/c/".length), config.id, PLATFORM_CLAIMTYPE, 1);
 	}
+	return new PlatformID(PLATFORM, username || path.replace(/^\/+/, ""), config.id, PLATFORM_CLAIMTYPE, 0);
+}
+
+function rumbleCommentFromNode(node, contextUrl) {
+	return new Comment({
+		contextUrl: contextUrl,
+		author: new PlatformAuthorLink(
+			getCommentAuthorId(node),
+			node.authorName ?? "",
+			node.authorUrl ?? "",
+			node.authorThumbnail ?? ""
+		),
+		message: node.message ?? "",
+		date: Number.isFinite(node.date) ? node.date : 0,
+		replyCount: Array.isArray(node.replies) ? node.replies.length : 0,
+		rating: new RatingLikes(Number.isFinite(node.likeCount) ? node.likeCount : 0),
+		// context is a native Map<String,String> - stringify the reply subtree.
+		context: { replies: JSON.stringify(node.replies ?? []) }
+	});
 }
 
 class RumbleChannelPager extends ChannelPager {
