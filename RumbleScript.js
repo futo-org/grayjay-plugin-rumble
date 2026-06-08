@@ -15,8 +15,6 @@ const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*backgroun
 const REGEX_USER_IMAGE = /user-image--img--id-([0-9a-z]+)/;
 const REGEX_VIDEO_IMAGE_CSS = /.video-item--by-a--([0-9a-z]+)::before\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
 const REGEX_VIDEO_IMAGE = /video-item--by-a--([0-9a-z]+)/;
-const REGEX_MEDIALIST_IMAGE_CSS = /\.mediaList-image--id-size-[^-]+-(\d+)\s*\{\s*background-image:\s*url\(([^)]+)\)/g;
-const REGEX_MEDIALIST_IMAGE = /mediaList-image--id-size-[^-]+-(\d+)/;
 const REGEX_VIDEO_ID = /(?:https:\/\/.+)?\/([^-]+)/;
 const REGEX_VIDEO_INFO = /Rumble\("play", ({".*?),"api"/
 const REGEX_EMBED_URL = /^https?:\/\/(www\.)?rumble\.com\/embed\//;
@@ -812,243 +810,39 @@ source.getContentRecommendations = function (url, res) {
 		}
 	}
 
-	const doc = domParser.parseFromString(res.body, "text/html");
-
-	// Detect if this is a live stream page
-	const liveHeaderInfo = doc.getElementsByClassName("video-header-live-info");
-	const isLiveStreamPage = liveHeaderInfo.length > 0 && liveHeaderInfo[0].getElementsByClassName("live-video-view-count-status").length > 0;
-
-	// Route to appropriate specialized function
-	if (isLiveStreamPage) {
-		return getLiveContentRecommendations(url, res, doc);
-	} else {
-		return getVodContentRecommendations(url, res, doc);
+	// Rumble no longer renders the related-videos sidebar in the page HTML; it is
+	// loaded client-side from the video.autoplay service endpoint, which returns the
+	// same JSON video schema as channel feeds (works for both VOD and live).
+	const vid = findVideoIdInteger(res.body);
+	if (!vid) {
+		return new VideoPager([], false);
 	}
-};
 
-function getVodContentRecommendations(url, res, doc) {
-	const relatedVideos = [];
-	const seenVideoIds = new Set();
-	const userImages = getUserImageList(res.body);
-	const mediaListImages = getMediaListImageList(res.body);
-
-	// Parse related videos from the sidebar - try aside first, then fall back to mediaList-list container
-	let mediaListItems = doc.querySelectorAll("aside .mediaList-item");
-	if (!mediaListItems || mediaListItems.length === 0) {
-		mediaListItems = doc.querySelectorAll(".mediaList-list.related .mediaList-item");
+	const recRes = httpGET(`${URL_BASE}/service.php?api=7&options=video.full&video_id=${vid}&name=video.autoplay`);
+	if (!recRes.isOk) {
+		return new VideoPager([], false);
 	}
-	mediaListItems = mediaListItems ?? [];
 
-	for (let i = 0; i < mediaListItems.length; i++) {
-		try {
-			const item = mediaListItems[i];
-			const link = item.querySelector(".mediaList-link");
-			if (!link) {
-				continue;
-			}
+	let data;
+	try {
+		data = JSON.parse(recRes.body);
+	} catch (e) {
+		log("Error parsing content recommendations " + e);
+		return new VideoPager([], false);
+	}
 
-			const videoUrl = asAbsoluteURL(link.getAttribute("href"));
-			const id = getVideoIdFromUrl(videoUrl);
-
-			// Skip duplicates (can appear from mobile/desktop layout variants)
-			if (seenVideoIds.has(id)) {
-				continue;
-			}
-			seenVideoIds.add(id);
-
-			const img = item.querySelector(".mediaList-image");
-			const thumbnails = [];
-			if (img) {
-				// First try the src attribute (direct img tag)
-				let src = img.getAttribute("src");
-				
-				// If no src, try to extract from CSS class (SVG with background-image in CSS)
-				if (!src) {
-					const imgClass = img.getAttribute("class") || "";
-					const match = imgClass.match(REGEX_MEDIALIST_IMAGE);
-					if (match && match[1]) {
-						src = mediaListImages[match[1]];
-					}
-				}
-				
-				if (src) {
-					thumbnails.push(new Thumbnail(src, 0));
-				}
-			}
-
-			const title = item.querySelector(".mediaList-heading");
-
-			const durationElement = item.querySelector(".mediaList-duration");
-			const duration = hhmmssToDuration(durationElement?.textContent);
-
-			const viewsElement = item.querySelector(".video-counters--item.video-item--views");
-			let viewCount = 0;
-			if (viewsElement) {
-				const viewText = viewsElement?.textContent?.trim() ?? "";
-				viewCount = fromHumanNumber(viewText) || 0;
-			}
-
-			const channelSection = item.querySelector(".mediaList-by");
-
-			const channelNameElement = channelSection?.querySelector(".mediaList-by-heading");
-			const channelName = channelNameElement?.textContent;
-
-			const [channelLink] = channelSection?.querySelectorAll("a");
-			const channelHref = channelLink?.getAttribute?.("href");
-
-			const channelUrl = asAbsoluteURL(channelHref);
-
-			const channelImage = channelSection?.querySelector("[data-js='user-image']");
-			const channelImageId = getThumbnailId(channelImage);
-			const channelImageUrl = userImages[channelImageId];
-
-			const [liveElement] = item.querySelectorAll(".mediaList-live");
-			const isLive = !!liveElement;
-
-			const [timestampElement] = item.querySelectorAll(".mediaList-timestamp");
-
-			let uploadDate = 0;
-			if (timestampElement) {
-				uploadDate = extractAgoText_Timestamp(timestampElement.textContent);
-			}
-
-			const video = new PlatformVideo({
-				id: new PlatformID(PLATFORM, id, config.id),
-				name: decodeHtmlEntities(title?.textContent?.trim()) ?? "",
-				thumbnails: new Thumbnails(thumbnails),
-				author: new PlatformAuthorLink(
-					getAuthorIdFromUrl(channelUrl),
-					channelName ?? "",
-					channelUrl ?? "",
-					asAbsoluteURL(channelImageUrl) ?? ""
-				),
-				uploadDate: uploadDate,
-				duration: duration,
-				viewCount: viewCount,
-				url: videoUrl,
-				isLive: isLive
-			});
-
-			relatedVideos.push(video);
-		} catch (e) {
-			log("Error parsing related video " + e);
+	const items = data?.data?.videos ?? [];
+	const results = [];
+	const seen = new Set();
+	for (const item of items) {
+		if (item.object_type !== "video" || !item.url || seen.has(item.url)) {
+			continue;
 		}
+		seen.add(item.url);
+		results.push(parseChannelJsonVideo(item, null));
 	}
 
-	return new VideoPager(relatedVideos, false);
-};
-
-function getLiveContentRecommendations(url, res, doc) {
-	const relatedVideos = [];
-	const seenVideoIds = new Set();
-	const userImages = getUserImageList(res.body);
-	const mediaListImages = getMediaListImageList(res.body);
-
-	// Try main selectors - live streams use mediaList-list container for related videos
-	let mediaListItems = doc.querySelectorAll(".mediaList-list.related .mediaList-item");
-	if (!mediaListItems || mediaListItems.length === 0) {
-		mediaListItems = doc.querySelectorAll("aside .mediaList-item, .live-recommendations .video-item, .mediaList-item");
-	}
-
-	for (let i = 0; i < mediaListItems.length; i++) {
-		try {
-			const item = mediaListItems[i];
-
-			// Use same selectors as VOD since live streams likely use same structure
-			const link = item.querySelector(".mediaList-link");
-			if (!link) {
-				continue;
-			}
-
-			const videoUrl = asAbsoluteURL(link.getAttribute("href"));
-			const id = getVideoIdFromUrl(videoUrl);
-
-			// Skip duplicates (can appear from mobile/desktop layout variants)
-			if (seenVideoIds.has(id)) {
-				continue;
-			}
-			seenVideoIds.add(id);
-
-			const img = item.querySelector(".mediaList-image");
-			const thumbnails = [];
-			if (img) {
-				// First try the src attribute (direct img tag)
-				let src = img.getAttribute("src");
-				
-				// If no src, try to extract from CSS class (SVG with background-image in CSS)
-				if (!src) {
-					const imgClass = img.getAttribute("class") || "";
-					const match = imgClass.match(REGEX_MEDIALIST_IMAGE);
-					if (match && match[1]) {
-						src = mediaListImages[match[1]];
-					}
-				}
-				
-				if (src) {
-					thumbnails.push(new Thumbnail(src, 0));
-				}
-			}
-
-			const title = item.querySelector(".mediaList-heading");
-
-			const durationElement = item.querySelector(".mediaList-duration");
-			const duration = hhmmssToDuration(durationElement?.textContent);
-
-			const viewsElement = item.querySelector(".video-counters--item.video-item--views");
-			let viewCount = 0;
-			if (viewsElement) {
-				const viewText = viewsElement?.textContent?.trim() ?? "";
-				viewCount = fromHumanNumber(viewText) || 0;
-			}
-
-			const channelSection = item.querySelector(".mediaList-by");
-
-			const channelNameElement = channelSection?.querySelector(".mediaList-by-heading");
-			const channelName = channelNameElement?.textContent;
-
-			const [channelLink] = channelSection?.querySelectorAll("a");
-			const channelHref = channelLink?.getAttribute?.("href");
-
-			const channelUrl = asAbsoluteURL(channelHref);
-
-			const channelImage = channelSection?.querySelector("[data-js='user-image']");
-			const channelImageId = getThumbnailId(channelImage);
-			const channelImageUrl = userImages[channelImageId];
-
-			const [liveElement] = item.querySelectorAll(".mediaList-live");
-			const isLive = !!liveElement;
-
-			const [timestampElement] = channelSection?.querySelectorAll(".mediaList-timestamp");
-
-			let uploadDate = 0;
-			if (timestampElement) {
-				uploadDate = extractAgoText_Timestamp(timestampElement.textContent);
-			}
-
-			const video = new PlatformVideo({
-				id: new PlatformID(PLATFORM, id, config.id),
-				name: decodeHtmlEntities(title?.textContent?.trim()) ?? "",
-				thumbnails: new Thumbnails(thumbnails),
-				author: new PlatformAuthorLink(
-					getAuthorIdFromUrl(channelUrl),
-					channelName ?? "",
-					channelUrl ?? "",
-					asAbsoluteURL(channelImageUrl) ?? ""
-				),
-				uploadDate: uploadDate,
-				duration: duration,
-				viewCount: viewCount,
-				url: videoUrl,
-				isLive: isLive
-			});
-
-			relatedVideos.push(video);
-		} catch (e) {
-			log("Error parsing live stream related video " + e);
-		}
-	}
-
-	return new VideoPager(relatedVideos, false);
+	return new VideoPager(results, false);
 };
 
 //#endregion
@@ -1157,19 +951,6 @@ function getUserImageList(src) {
 		userImages[userImage[1]] = userImage[2];
 	}
 	return userImages;
-}
-
-/**
- * Gets a map of mediaList thumbnail images from CSS background-image declarations
- * @param {String} src The source
- * @returns {Map<String, String>} A mediaList image map (video ID to thumbnail URL)
- */
-function getMediaListImageList(src) {
-	const mediaListImages = {};
-	for (const match of src.matchAll(REGEX_MEDIALIST_IMAGE_CSS)) {
-		mediaListImages[match[1]] = match[2];
-	}
-	return mediaListImages;
 }
 
 /**
@@ -1473,7 +1254,9 @@ function findVideoId(text) {
  * @param {String} text
  */
 function findVideoIdInteger(text) {
-	const vidMatch = text.match(/video_id:\s(.*?),/);
+	// Live pages embed `video_id: 12345,` (player config) while VOD pages embed
+	// `video_id": "12345"` (HTML attribute) - match both numeric forms.
+	const vidMatch = text.match(/video_id"?\s*:\s*"?(\d+)/);
 	const vid = vidMatch ? vidMatch[1] : null;
 	return vid;
 }
