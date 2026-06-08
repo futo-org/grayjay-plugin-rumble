@@ -1319,6 +1319,85 @@ function parseVideoStreams(elements, author) {
 }
 
 /**
+ * Parse Rumble channel/user page embedded JSON video feeds.
+ * Channel grids are rendered client-side from <script type="application/json">
+ * blobs of the form { items: [...] } instead of server-side video HTML.
+ * @param {String} src raw page body
+ * @param {PlatformAuthorLink?} author channel author to attach to each video
+ * @returns {PlatformVideo[]}
+ */
+function parseChannelJsonVideos(src, author) {
+	const results = [];
+	const seen = new Set();
+	const re = /<script\s+type="application\/json">/gi;
+	let m;
+	while ((m = re.exec(src))) {
+		const start = src.indexOf(">", m.index) + 1;
+		const end = src.indexOf("</script>", start);
+		if (end < 0) {
+			continue;
+		}
+
+		let data;
+		try {
+			data = JSON.parse(src.substring(start, end).trim());
+		} catch (e) {
+			continue;
+		}
+
+		if (!data || !Array.isArray(data.items)) {
+			continue;
+		}
+
+		for (const item of data.items) {
+			if (item.object_type !== "video" || !item.url || seen.has(item.url)) {
+				continue;
+			}
+			seen.add(item.url);
+			results.push(parseChannelJsonVideo(item, author));
+		}
+	}
+
+	return results;
+}
+
+/**
+ * Build a PlatformVideo from a Rumble channel JSON feed item.
+ * @param {Object} item
+ * @param {PlatformAuthorLink?} author
+ * @returns {PlatformVideo}
+ */
+function parseChannelJsonVideo(item, author) {
+	const thumbnails = [];
+	if (item.thumb) {
+		thumbnails.push(new Thumbnail(item.thumb, 0));
+	}
+
+	let videoAuthor = author;
+	if (!videoAuthor && item.by) {
+		const by = item.by;
+		videoAuthor = new PlatformAuthorLink(
+			getAuthorIdFromUrl(by.relative_url ?? by.url),
+			by.name,
+			by.url ?? asAbsoluteURL(by.relative_url),
+			by.thumb ?? ""
+		);
+	}
+
+	return new PlatformVideo({
+		id: new PlatformID(PLATFORM, getVideoIdFromUrl(item.url), config.id),
+		name: decodeHtmlEntities(item.title) ?? "",
+		thumbnails: new Thumbnails(thumbnails),
+		author: videoAuthor,
+		uploadDate: dateToUnixTime(item.upload_date),
+		duration: item.duration ?? 0,
+		viewCount: item.views ?? 0,
+		url: item.url,
+		isLive: item.live ? true : false
+	});
+}
+
+/**
  * Retrieves the videos pager for a specific page
  * @param {String} url The base URL
  * @param {{[key: string]: any}} params Query parameters
@@ -1343,6 +1422,11 @@ function getVideosPager(url, params, author) {
 		{
 			const elements = doc.querySelectorAll(".thumbnail__grid .videostream");
 			const r = parseVideoStreams(elements, author);
+			results.push(...r);
+		}
+
+		{
+			const r = parseChannelJsonVideos(res.body, author);
 			results.push(...r);
 		}
 
