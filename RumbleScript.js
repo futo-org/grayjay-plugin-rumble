@@ -659,9 +659,9 @@ source.getLiveChatWindow = function (url) {
 	}
 };
 source.getComments = function (url) {
-	const comments = [];
+	const rootNodes = [];
 	const res = httpGET({ url, useAuthenticated: true });
-	let lastCommentPerLevel = {};
+	const lastNodePerLevel = {};
 	if (res.isOk) {
 		const vid = findVideoId(res.body).substring(1);
 		const commentsRes = httpGET({ url: URL_COMMENTS + vid, useAuthenticated: true });
@@ -679,15 +679,8 @@ source.getComments = function (url) {
 				/** @type {Element} */
 				const e = elements[i];
 
-				let isCreate = false;
-				for (let i = 0; i < e.classList.length; i++) {
-					if (e.classList[i] === "comments-create") {
-						isCreate = true;
-						break;
-					}
-				}
-
-				if (isCreate) {
+				const classAttr = e.getAttribute("class") ?? "";
+				if (classAttr.split(/\s+/).includes("comments-create")) {
 					continue;
 				}
 
@@ -695,48 +688,76 @@ source.getComments = function (url) {
 				const time = firstByClassOrNull(e, "comments-meta-post-time");
 				const text = firstByClassOrNull(e, "comment-text");
 				const thumbnail = firstByClassOrNull(e, "user-image--img");
-				const like_count = parseInt(firstByClassOrNull(e, "rumbles-count")?.textContent ?? '0')
+				const likeCount = parseInt(firstByClassOrNull(e, "rumbles-count")?.textContent ?? '0');
 
 				const authorThumbnailUrl = userImages[getThumbnailId(thumbnail)];
-				const replyCount = e.getAttribute("data-num-replies");
+				const replyCountAttr = e.getAttribute("data-num-replies");
 
+				// Depth from parent <ul class="comments-N"> (N=1 is top level).
 				let depth = 0;
-				const match = e.parentNode?.className.match(/^comments-(\d+)$/);
+				const parentClass = e.parentNode?.getAttribute?.("class") ?? "";
+				const match = parentClass.match(/^comments-(\d+)$/);
 				if (match) {
-					depth = parseInt(match[1]);
-
-					if (isNaN(depth)) {
-						depth = 0;
-					} else {
-						depth = depth - 1;
-					}
+					const level = parseInt(match[1]);
+					depth = isNaN(level) ? 0 : Math.max(0, level - 1);
 				}
 
 				const authorHref = asAbsoluteURL(author?.getAttribute("href"));
-				const c = new RumbleComment({
-					contextUrl: url,
-					author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref),
-						author.textContent ?? "",
-						asAbsoluteURL(authorHref),
-						asAbsoluteURL(authorThumbnailUrl) ?? ""),
+
+				const node = {
+					authorName: author?.textContent ?? "",
+					authorUrl: authorHref ?? "",
+					authorUsername: e.getAttribute("data-username") ?? "",
+					authorThumbnail: asAbsoluteURL(authorThumbnailUrl) ?? "",
 					message: text?.textContent ?? "",
 					date: extractAgoText_Timestamp(time?.textContent),
-					replyCount: replyCount != null ? parseInt(replyCount) : 0,
-					replies: [],
-					rating: new RatingLikes(like_count)
-				});
+					replyCount: replyCountAttr != null ? parseInt(replyCountAttr) : 0,
+					likeCount: isNaN(likeCount) ? 0 : likeCount,
+					replies: []
+				};
 
-				lastCommentPerLevel[depth] = c;
-
-				if (depth == 0) {
-					comments.push(c);
+				lastNodePerLevel[depth] = node;
+				if (depth === 0) {
+					rootNodes.push(node);
+				} else if (lastNodePerLevel[depth - 1]) {
+					lastNodePerLevel[depth - 1].replies.push(node);
 				} else {
-					lastCommentPerLevel[depth - 1].replies.push(c);
+					rootNodes.push(node); // orphan reply - surface rather than drop
 				}
 			}
 		}
 	}
 
+	const comments = rootNodes.map(n => rumbleCommentFromNode(n, url));
+	return new RumbleCommentPager(comments, 20);
+}
+
+source.getSubComments = function (comment) {
+
+	if (typeof comment === "string") {
+		try {
+			comment = JSON.parse(comment);
+		} catch (e) {
+			bridge.log("getSubComments: failed to parse comment - " + e);
+			return new CommentPager([], false);
+		}
+	}
+
+	// context.replies is a JSON string (context is a native Map<String,String>).
+	let replies = [];
+	const raw = comment?.context?.replies;
+	if (typeof raw === "string" && raw.length > 0) {
+		try {
+			replies = JSON.parse(raw);
+		} catch (e) {
+			bridge.log("getSubComments: failed to parse replies - " + e);
+		}
+	} else if (Array.isArray(raw)) {
+		replies = raw;
+	}
+
+	const contextUrl = comment?.contextUrl ?? "";
+	const comments = replies.map(n => rumbleCommentFromNode(n, contextUrl));
 	return new RumbleCommentPager(comments, 20);
 }
 
@@ -756,8 +777,7 @@ source.getUserSubscriptions = function () {
 	const doc = domParser.parseFromString(res.body, "text/html");
 	const tables = doc.getElementsByTagName("table");
 	if (tables.length === 0) {
-		// No subscriptions table - happens when the auth cookie is stale (Rumble
-		// serves an auth wall) or the page markup changed. Fail gracefully.
+		// No table - usually a stale-auth wall. Fail gracefully instead of crashing.
 		bridge.log("Failed to parse subscriptions page (no table found).");
 		return [];
 	}
@@ -800,9 +820,9 @@ class RumbleCommentPager extends CommentPager {
 
 	nextPage() {
 		const end = Math.min(this.offset + this.pageSize, this.allResults.length);
-		this.results = this.allResults.slice(this.offset, end - this.offset);
+		this.results = this.allResults.slice(this.offset, end);
 		this.offset = end;
-		this.hasMore = this.offset + this.pageSize < this.allResults.length;
+		this.hasMore = this.offset < this.allResults.length;
 		return this;
 	}
 }
@@ -816,9 +836,7 @@ source.getContentRecommendations = function (url, res) {
 		}
 	}
 
-	// Rumble no longer renders the related-videos sidebar in the page HTML; it is
-	// loaded client-side from the video.autoplay service endpoint, which returns the
-	// same JSON video schema as channel feeds (works for both VOD and live).
+	// Related videos come from the video.autoplay endpoint (not the page HTML).
 	const vid = findVideoIdInteger(res.body);
 	if (!vid) {
 		return new VideoPager([], false);
@@ -1516,15 +1534,40 @@ function isEmbedUrl(url) {
 	return REGEX_EMBED_URL.test(url);
 }
 
-class RumbleComment extends Comment {
-	constructor(obj) {
-		super(obj);
-		this.replies = obj.replies;
+// Author id from the always-present data-username (the href can be missing); the
+// href only selects the /c/ vs /user/ claim field type.
+function getCommentAuthorId(node) {
+	let path = node.authorUrl ?? "";
+	if (path.startsWith("https://rumble.com")) {
+		path = path.substring("https://rumble.com".length);
+	}
+	if (path.startsWith("http://rumble.com")) {
+		path = path.substring("http://rumble.com".length);
 	}
 
-	getReplies() {
-		return new RumbleCommentPager(this.replies, 20);
+	const username = node.authorUsername || node.authorName || "";
+	if (path.startsWith("/c/")) {
+		return new PlatformID(PLATFORM, username || path.substring("/c/".length), config.id, PLATFORM_CLAIMTYPE, 1);
 	}
+	return new PlatformID(PLATFORM, username || path.replace(/^\/+/, ""), config.id, PLATFORM_CLAIMTYPE, 0);
+}
+
+function rumbleCommentFromNode(node, contextUrl) {
+	return new Comment({
+		contextUrl: contextUrl,
+		author: new PlatformAuthorLink(
+			getCommentAuthorId(node),
+			node.authorName ?? "",
+			node.authorUrl ?? "",
+			node.authorThumbnail ?? ""
+		),
+		message: node.message ?? "",
+		date: Number.isFinite(node.date) ? node.date : 0,
+		replyCount: Number.isFinite(node.replyCount) ? node.replyCount : 0,
+		rating: new RatingLikes(Number.isFinite(node.likeCount) ? node.likeCount : 0),
+		// context is a native Map<String,String> - stringify the reply subtree.
+		context: { replies: JSON.stringify(node.replies ?? []) }
+	});
 }
 
 class RumbleChannelPager extends ChannelPager {
