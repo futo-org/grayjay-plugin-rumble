@@ -3,15 +3,14 @@
 	"description": "A plugin that adds Rumble as a source",
 	"author": "FUTO",
 	"authorUrl": "https://futo.org",
-
 	"platformUrl": "https://rumble.com",
 	"sourceUrl": "https://plugins.grayjay.app/Rumble/RumbleConfig.json",
 	"repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/rumble",
 	"scriptUrl": "./RumbleScript.js",
-	"version": 67,
+	"version": 68,
 	"iconUrl": "./rumble.png",
 	"id": "2ce7b35e-d2b2-4adb-a728-a34a30d30359",
-
+	"subscriptionRateLimit": 50,
 	"scriptSignature": "",
 	"scriptPublicKey": "",
 	"packages": ["Http","DOMParser"],
@@ -124,6 +123,12 @@
 			"Fix: Content recommendations;",
 			"Fix: Comments pagination;",
 			"Fix: Comments replies;"
+		],
+		"68": [
+			"Improvement: Do not force user-agent for captcha and authentication;",
+			"Improvement: Add subscription rate limit;",
+			"Improvement: Skip redundant channel about-page fetch when loading channel videos;",
+			"Improvement: Dispose parsed HTML documents on Android to reduce memory pressure;"
 		]
 	}
 }

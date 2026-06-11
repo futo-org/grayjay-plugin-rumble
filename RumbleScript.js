@@ -7,7 +7,9 @@ const URL_BASE_VIDEO = `${URL_BASE}/v`;
 const URL_VIDEO_DETAIL = `${URL_BASE}/embedJS/u3/`;
 const URL_COMMENTS = "https://rumble.com/service.php?name=comment.list&video=";
 const URL_SEARCH_CHANNEL = `${URL_BASE}/search/channel?q=`;
-const IS_DESKTOP = bridge.buildPlatform === "desktop";
+const BUILD_PLATFORM = bridge.buildPlatform;
+const IS_DESKTOP = BUILD_PLATFORM === "desktop";
+const IS_ANDROID = BUILD_PLATFORM === "android";
 const USER_AGENT_MOBILE = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36';
 const USER_AGENT_DESKTOP = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 const USER_AGENT_FALLBACK = IS_DESKTOP ? USER_AGENT_DESKTOP : USER_AGENT_MOBILE;
@@ -101,9 +103,6 @@ const PLATFORM_CLAIMTYPE = 4;
 
 let config = {};
 let settings = {};
-
-// TODO: workaround for desktop since currently it doesn't support rendering html in channel description
-const isAndroid = bridge.buildPlatform === "android";
 
 let state = {
 	defaultHeaders: {
@@ -259,76 +258,81 @@ function getChannelsPage(query, page = null) {
 
 	const userImages = getUserImageList(res.body);
 	const doc = domParser.parseFromString(res.body, "text/html");
-	let mainAndSidebar = doc.getElementsByClassName("main-and-sidebar");
-	if (!mainAndSidebar || mainAndSidebar.length < 1 || !mainAndSidebar[0]) {
-		return;
-	}
-	mainAndSidebar = mainAndSidebar[0];
 
-	let div = null;
-	for (let i = 0; i < mainAndSidebar.childNodes.length; i++) {
-		const child = mainAndSidebar.childNodes[i];
-		const tagName = child.tagName;
-		if (tagName === "DIV") {
-			div = child;
-			break;
+	try {
+		let mainAndSidebar = doc.getElementsByClassName("main-and-sidebar");
+		if (!mainAndSidebar || mainAndSidebar.length < 1 || !mainAndSidebar[0]) {
+			return;
 		}
-	}
+		mainAndSidebar = mainAndSidebar[0];
 
-	if (!div) {
-		return;
-	}
-
-	const elements = div.childNodes;
-	const results = [];
-	let articleIndex = 0;
-	for (let i = 0; i < elements.length; i++) {
-		const e = elements[i];
-		if (e.tagName !== "ARTICLE")
-			continue;
-
-		const a = e.querySelector("a[href]");
-		const img = e.querySelector("i[data-js='user-image']");
-		const h3Element = e.querySelector("h3");
-		const title = h3Element?.querySelector("span");
-		const spans = h3Element?.parentElement.querySelectorAll("span");
-		let subscribers = spans?.[spans.length - 1];
-		if (subscribers) {
-			subscribers = subscribers.textContent.trim();
-			if (subscribers) {
-				subscribers = subscribers.replaceAll(".", "").replaceAll(",", "")
-				subscribers = parseInt(subscribers.split(' ')[0])
+		let div = null;
+		for (let i = 0; i < mainAndSidebar.childNodes.length; i++) {
+			const child = mainAndSidebar.childNodes[i];
+			const tagName = child.tagName;
+			if (tagName === "DIV") {
+				div = child;
+				break;
 			}
 		}
 
-		const url = a?.getAttribute("href");
-		const thumbnailId = articleIndex;
-		const thumbnailUrl = userImages[thumbnailId];
-		const id = getAuthorIdFromUrl(url);
-		const authorLink = new PlatformAuthorLink(
-			id,
-			title?.textContent ?? "",
-			asAbsoluteURL(url),
-			asAbsoluteURL(thumbnailUrl),
-			subscribers
-		);
-
-		results.push(authorLink);
-		articleIndex++;
-	}
-
-	let hasMore = false;
-
-	const headLinks = doc.querySelectorAll("link[rel='next']");
-	for (let i = 0; i < headLinks.length; i++) {
-		const link = headLinks[i];
-		if (link.getAttribute("rel") === "next") {
-			hasMore = true;
-			break;
+		if (!div) {
+			return;
 		}
-	}
 
-	return { results, hasMore};
+		const elements = div.childNodes;
+		const results = [];
+		let articleIndex = 0;
+		for (let i = 0; i < elements.length; i++) {
+			const e = elements[i];
+			if (e.tagName !== "ARTICLE")
+				continue;
+
+			const a = e.querySelector("a[href]");
+			const img = e.querySelector("i[data-js='user-image']");
+			const h3Element = e.querySelector("h3");
+			const title = h3Element?.querySelector("span");
+			const spans = h3Element?.parentElement.querySelectorAll("span");
+			let subscribers = spans?.[spans.length - 1];
+			if (subscribers) {
+				subscribers = subscribers.textContent.trim();
+				if (subscribers) {
+					subscribers = subscribers.replaceAll(".", "").replaceAll(",", "")
+					subscribers = parseInt(subscribers.split(' ')[0])
+				}
+			}
+
+			const url = a?.getAttribute("href");
+			const thumbnailId = articleIndex;
+			const thumbnailUrl = userImages[thumbnailId];
+			const id = getAuthorIdFromUrl(url);
+			const authorLink = new PlatformAuthorLink(
+				id,
+				title?.textContent ?? "",
+				asAbsoluteURL(url),
+				asAbsoluteURL(thumbnailUrl),
+				subscribers
+			);
+
+			results.push(authorLink);
+			articleIndex++;
+		}
+
+		let hasMore = false;
+
+		const headLinks = doc.querySelectorAll("link[rel='next']");
+		for (let i = 0; i < headLinks.length; i++) {
+			const link = headLinks[i];
+			if (link.getAttribute("rel") === "next") {
+				hasMore = true;
+				break;
+			}
+		}
+
+		return { results, hasMore };
+	} finally {
+		disposeDoc(doc);
+	}
 }
 
 source.searchChannels = function (query) {
@@ -343,16 +347,17 @@ source.isChannelUrl = function (url) {
 	}
 	return url.startsWith(URL_BASE_CHANNEL) || url.startsWith(URL_BASE_CHANNEL_ALT) || REGEX_CHANNEL_URL.test(url);
 };
+
 source.getChannel = function (url) {
 
-	if(!url) {
+	if (!url) {
 		throw new ScriptException("Failed to get channel. No URL provided.");
 	}
 
 	let aboutTabUrl = url?.toLocaleLowerCase();
-	
-	if(!aboutTabUrl.includes('/about')) {
-		if(aboutTabUrl.endsWith('/')) {
+
+	if (!aboutTabUrl.includes('/about')) {
+		if (aboutTabUrl.endsWith('/')) {
 			aboutTabUrl += 'about';
 		} else {
 			aboutTabUrl += '/about';
@@ -362,11 +367,11 @@ source.getChannel = function (url) {
 	const res = httpGET(aboutTabUrl);
 	if (!res.isOk) {
 
-		if(res.code === 404) {
+		if (res.code === 404) {
 			throw new UnavailableException(`Channel not found (${res.code}) for ${url}`);
 		}
 
-		if(res.code === 410) {
+		if (res.code === 410) {
 			throw new UnavailableException(`Channel removed (${res.code}) for ${url}`);
 		}
 
@@ -375,79 +380,82 @@ source.getChannel = function (url) {
 
 	const prefix = "channel"
 	const doc = domParser.parseFromString(res.body, "text/html");
-	
-	const [title] = doc.querySelectorAll(`.${prefix}-header--title h1`);
-	
-	const [img] = doc.querySelectorAll(`.${prefix}-header--img`);
-	
-	const [banner] = doc.querySelectorAll(`.${prefix}-header--backsplash-img`);
-	
-	const [subscribersElement] = doc.querySelectorAll(`.${prefix}-header--title span`);
-	
-	const [descriptionElement] = doc.querySelectorAll(`.${prefix}-about--description`);
-	
-	const socialLinksElments = doc.querySelectorAll(`.channel-about--socials a`);
-	
-	let links = {};
-	for (let i = 0; i < socialLinksElments.length; i++) {
-		const link = socialLinksElments[i];
-		const href = link.getAttribute("href");	
-		const name = link.textContent?.trim();
-		links[name] = href;
-	}
-	
-	let imageUrl = img?.getAttribute("src");
-	if (!imageUrl) {
-		const [imageEl] = doc.querySelectorAll(`.${prefix}-header--img`);	
-		if(imageEl) {
-			imageUrl = imageEl.getAttribute("src");
-		}
-	}
 
-	let description = descriptionElement?.textContent ?? "";
+	try {
 
-	const additionalInfoElements = doc.querySelectorAll(`.${prefix}-about-sidebar--inner p`);
+		const [title] = doc.querySelectorAll(`.${prefix}-header--title h1`);
 
-	if(additionalInfoElements.length && isAndroid) {
-		description += "<h3>Additional Details</h3>";
-	}
+		const [img] = doc.querySelectorAll(`.${prefix}-header--img`);
 
-	for (let i = 0; i < additionalInfoElements.length; i++) {
-		const element = additionalInfoElements[i];
+		const [banner] = doc.querySelectorAll(`.${prefix}-header--backsplash-img`);
 
-		//TODO: workaround for desktop since currently it doesn't support rendering html in channel description
-		if(isAndroid) {
-			description += `<p>`;
-		} else if(i === 0) {
-			description += ` | `;
+		const [subscribersElement] = doc.querySelectorAll(`.${prefix}-header--title span`);
+
+		const [descriptionElement] = doc.querySelectorAll(`.${prefix}-about--description`);
+
+		const socialLinksElments = doc.querySelectorAll(`.channel-about--socials a`);
+
+		let links = {};
+		for (let i = 0; i < socialLinksElments.length; i++) {
+			const link = socialLinksElments[i];
+			const href = link.getAttribute("href");
+			const name = link.textContent?.trim();
+			links[name] = href;
 		}
 
-		description +=  element.textContent;
-
-		if(isAndroid) {
-			description += `</p>`;
-		} else {
-			description += ` | `;
+		let imageUrl = img?.getAttribute("src");
+		if (!imageUrl) {
+			const [imageEl] = doc.querySelectorAll(`.${prefix}-header--img`);
+			if (imageEl) {
+				imageUrl = imageEl.getAttribute("src");
+			}
 		}
-	}
 
-	const channel = new PlatformChannel({
-		id: getAuthorIdFromUrl(url),
-		name: title?.textContent ?? "",
-		thumbnail: asAbsoluteURL(imageUrl),
-		banner: banner?.getAttribute("src") ?? "",
-		subscribers: extractSubCount(subscribersElement),
-		description,
-		url,
-		links
-	});
-	//doc.dispose();
-	return channel;
+		let description = descriptionElement?.textContent ?? "";
+
+		const additionalInfoElements = doc.querySelectorAll(`.${prefix}-about-sidebar--inner p`);
+
+		if (additionalInfoElements.length && IS_ANDROID) {
+			description += "<h3>Additional Details</h3>";
+		}
+
+		for (let i = 0; i < additionalInfoElements.length; i++) {
+			const element = additionalInfoElements[i];
+
+			//TODO: workaround for desktop since currently it doesn't support rendering html in channel description
+			if (IS_ANDROID) {
+				description += `<p>`;
+			} else if (i === 0) {
+				description += ` | `;
+			}
+
+			description += element.textContent;
+
+			if (IS_ANDROID) {
+				description += `</p>`;
+			} else {
+				description += ` | `;
+			}
+		}
+
+		const channel = new PlatformChannel({
+			id: getAuthorIdFromUrl(url),
+			name: title?.textContent ?? "",
+			thumbnail: asAbsoluteURL(imageUrl),
+			banner: banner?.getAttribute("src") ?? "",
+			subscribers: extractSubCount(subscribersElement),
+			description,
+			url,
+			links
+		});
+		return channel;
+	} finally {
+		disposeDoc(doc);
+	}
 };
+
 source.getChannelContents = function (url) {
-	const author = source.getChannel(url);
-	const authorLink = new PlatformAuthorLink(author.id, author.name, author.url, author.thumbnail);
-	return getVideosPager(url, {}, authorLink);
+	return getVideosPager(url, {});
 };
 
 source.getChannelTemplateByClaimMap = () => {
@@ -464,6 +472,7 @@ source.getChannelTemplateByClaimMap = () => {
 source.isContentDetailsUrl = function (url) {
 	return url.startsWith(URL_BASE_VIDEO) || isEmbedUrl(url);
 };
+
 source.getContentDetails = function (url) {
 
 	if (isEmbedUrl(url)) {
@@ -472,7 +481,11 @@ source.getContentDetails = function (url) {
 		const canonicalUrlResolutionRes = httpGET({ url, useAuthenticated: true });
 		if (canonicalUrlResolutionRes.isOk) {
 			const doc = domParser.parseFromString(canonicalUrlResolutionRes.body, "text/html");
-			canonicalUrl = doc.querySelector("link[rel='canonical']")?.getAttribute("href");
+			try {
+				canonicalUrl = doc.querySelector("link[rel='canonical']")?.getAttribute("href");
+			} finally {
+				disposeDoc(doc);
+			}
 		}
 
 		if (canonicalUrl) {
@@ -489,161 +502,164 @@ source.getContentDetails = function (url) {
 	}
 
 	const doc = domParser.parseFromString(res.body, "text/html");
-	const userImages = getUserImageList(res.body);
+	try {
+		const userImages = getUserImageList(res.body);
 
-	/** @type {Array} */
-	let ldJson = null;
-	const scriptElements = doc.getElementsByTagName("script");
+		/** @type {Array} */
+		let ldJson = null;
+		const scriptElements = doc.getElementsByTagName("script");
 
-	for (let i = 0; i < scriptElements.length; i++) {
-		if (scriptElements[i].getAttribute("type") === "application/ld+json") {
-			ldJson = JSON.parse(scriptElements[i].text);
-			break;
-		}
-	}
-
-	const vidInfo = findVideoInfo(res.body)
-	if (vidInfo === null) {
-		if (bridge.isLoggedIn()) {
-			throw new LoginRequiredException("Subscribe to watch premium content")
-		} else {
-			throw new LoginRequiredException("Login to access premium content")
-		}
-	}
-	const vid = vidInfo.video
-	if (vidInfo.show_premium_exclusive_gate) {
-		bridge.toast("Contains premium exclusive section. Subscribe to watch premium content")
-	}
-	const resTracks = httpGET({
-		url: `${URL_VIDEO_DETAIL}${buildQuery({
-			request: "video",
-			ver: 2,
-			v: vid
-		})}`,
-		headers: {},
-		useAuthenticated: true
-	});
-
-	if (resTracks.code != 200) {
-		return null;
-	}
-
-	const videoDetail = JSON.parse(resTracks.body);
-	const sources = [];
-	const liveHeaderInfo = doc.getElementsByClassName("video-header-live-info");
-	let isLive = liveHeaderInfo.length > 0 && liveHeaderInfo[0].getElementsByClassName("live-video-view-count-status").length > 0;
-	let liveStream = null;
-	for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
-		if (["timeline", "audio"].includes(containerName?.toLocaleLowerCase())) {
-			continue;
+		for (let i = 0; i < scriptElements.length; i++) {
+			if (scriptElements[i].getAttribute("type") === "application/ld+json") {
+				ldJson = JSON.parse(scriptElements[i].text);
+				break;
+			}
 		}
 
-		const resolutionKeys = Object.keys(resolutions);
-
-		const sortedResolutions = resolutionKeys
-		.filter(e => !isNaN(e))
-		.sort((a, b) => parseInt(b) - parseInt(a))
-		
-		const auto = resolutionKeys.filter(e => isNaN(e))
-
-		for (const resolution of [...auto, ...sortedResolutions]) {
-
-			const data = resolutions[resolution];
-
-			if (["hls", "tar"].includes(containerName?.toLocaleLowerCase())) {
-				if (resolution !== "auto") {
-					continue
-				}
-
-				const stream = new HLSSource({
-					name: "Rumble HLS",
-					url: data.url,
-				});
-
-				sources.push(stream);
-				if (isLive && data.meta.live) {
-					liveStream = stream;
-				}
+		const vidInfo = findVideoInfo(res.body)
+		if (vidInfo === null) {
+			if (bridge.isLoggedIn()) {
+				throw new LoginRequiredException("Subscribe to watch premium content")
 			} else {
-				sources.push(new VideoUrlSource({
-					name: `Original ${data.meta.h}P`,
-					url: data.url,
-					width: data.meta.w,
-					height: data.meta.h,
-					bitrate: data.meta.bitrate,
-					duration: videoDetail.duration ?? -1,
-					container: `video/${containerName}`
-				}));
+				throw new LoginRequiredException("Login to access premium content")
 			}
 		}
-	}
+		const vid = vidInfo.video
+		if (vidInfo.show_premium_exclusive_gate) {
+			bridge.toast("Contains premium exclusive section. Subscribe to watch premium content")
+		}
+		const resTracks = httpGET({
+			url: `${URL_VIDEO_DETAIL}${buildQuery({
+				request: "video",
+				ver: 2,
+				v: vid
+			})}`,
+			headers: {},
+			useAuthenticated: true
+		});
 
-	let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
+		if (resTracks.code != 200) {
+			return null;
+		}
 
-	const authorHref = firstByClassOrNull(doc, "media-by--a");
-	const authorThumbnail = firstByClassOrNull(authorHref, "user-image");
-	
-	const subscribersElement = firstByClassOrNull(authorHref,`media-heading-num-followers`);
-	
-	const authorThumbnailUrl = userImages[getThumbnailId(authorThumbnail)];
-	const thumbnailUrl = videoObject?.thumbnailUrl;
-	const thumbnails = [];
-	if (thumbnailUrl) {
-		thumbnails.push(new Thumbnail(thumbnailUrl, 0));
-	}
+		const videoDetail = JSON.parse(resTracks.body);
+		const sources = [];
+		const liveHeaderInfo = doc.getElementsByClassName("video-header-live-info");
+		let isLive = liveHeaderInfo.length > 0 && liveHeaderInfo[0].getElementsByClassName("live-video-view-count-status").length > 0;
+		let liveStream = null;
+		for (const [containerName, resolutions] of Object.entries(videoDetail.ua)) {
+			if (["timeline", "audio"].includes(containerName?.toLocaleLowerCase())) {
+				continue;
+			}
 
-	const userInteractionCount = videoObject?.interactionStatistic?.userInteractionCount;
-	const id = getVideoIdFromUrl(url);
-	const upVotesMatch = /<span data-js="rumbles_up_votes">([^<]+)<\/span>/.exec(res.body);
-	const upVotes = upVotesMatch ? upVotesMatch[1] : null;
-	const downVotesMatch = /<span data-js="rumbles_down_votes">([^<]+)<\/span>/.exec(res.body);
-	const downVotes = downVotesMatch ? downVotesMatch[1] : null;
-	const rating = new RatingLikesDislikes(fromHumanNumber(upVotes) ?? 0, fromHumanNumber(downVotes) ?? 0);
-	const subscribers = extractSubCount(subscribersElement);
-	
-	let description = ""
-	if (videoObject.description !== "") {
-		const description_child_nodes = doc.querySelector(`[data-js="media_long_description_container"]`).childNodes
+			const resolutionKeys = Object.keys(resolutions);
 
-		for (const [index, node] of description_child_nodes.entries()) {
-			if (node.nodeType === "p") {
-				description += node.innerHTML
-				if (index !== description_child_nodes.length - 1) {
-					description += "\n"
-					description += "\n"
+			const sortedResolutions = resolutionKeys
+				.filter(e => !isNaN(e))
+				.sort((a, b) => parseInt(b) - parseInt(a))
+
+			const auto = resolutionKeys.filter(e => isNaN(e))
+
+			for (const resolution of [...auto, ...sortedResolutions]) {
+
+				const data = resolutions[resolution];
+
+				if (["hls", "tar"].includes(containerName?.toLocaleLowerCase())) {
+					if (resolution !== "auto") {
+						continue
+					}
+
+					const stream = new HLSSource({
+						name: "Rumble HLS",
+						url: data.url,
+					});
+
+					sources.push(stream);
+					if (isLive && data.meta.live) {
+						liveStream = stream;
+					}
+				} else {
+					sources.push(new VideoUrlSource({
+						name: `Original ${data.meta.h}P`,
+						url: data.url,
+						width: data.meta.w,
+						height: data.meta.h,
+						bitrate: data.meta.bitrate,
+						duration: videoDetail.duration ?? -1,
+						container: `video/${containerName}`
+					}));
 				}
 			}
 		}
+
+		let videoObject = ldJson.find(j => j["@type"] === "VideoObject");
+
+		const authorHref = firstByClassOrNull(doc, "media-by--a");
+		const authorThumbnail = firstByClassOrNull(authorHref, "user-image");
+
+		const subscribersElement = firstByClassOrNull(authorHref, `media-heading-num-followers`);
+
+		const authorThumbnailUrl = userImages[getThumbnailId(authorThumbnail)];
+		const thumbnailUrl = videoObject?.thumbnailUrl;
+		const thumbnails = [];
+		if (thumbnailUrl) {
+			thumbnails.push(new Thumbnail(thumbnailUrl, 0));
+		}
+
+		const userInteractionCount = videoObject?.interactionStatistic?.userInteractionCount;
+		const id = getVideoIdFromUrl(url);
+		const upVotesMatch = /<span data-js="rumbles_up_votes">([^<]+)<\/span>/.exec(res.body);
+		const upVotes = upVotesMatch ? upVotesMatch[1] : null;
+		const downVotesMatch = /<span data-js="rumbles_down_votes">([^<]+)<\/span>/.exec(res.body);
+		const downVotes = downVotesMatch ? downVotesMatch[1] : null;
+		const rating = new RatingLikesDislikes(fromHumanNumber(upVotes) ?? 0, fromHumanNumber(downVotes) ?? 0);
+		const subscribers = extractSubCount(subscribersElement);
+
+		let description = ""
+		if (videoObject.description !== "") {
+			const description_child_nodes = doc.querySelector(`[data-js="media_long_description_container"]`).childNodes
+
+			for (const [index, node] of description_child_nodes.entries()) {
+				if (node.nodeType === "p") {
+					description += node.innerHTML
+					if (index !== description_child_nodes.length - 1) {
+						description += "\n"
+						description += "\n"
+					}
+				}
+			}
+		}
+
+		const videoDetails = new PlatformVideoDetails({
+			id: new PlatformID(PLATFORM, id, config.id),
+			name: decodeHtmlEntities(videoDetail.title) ?? "",
+			thumbnails: new Thumbnails(thumbnails),
+			author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref.getAttribute("href")),
+				videoDetail.author.name ?? "",
+				videoDetail.author.url,
+				authorThumbnailUrl ?? null,
+				subscribers),
+			datetime: dateToUnixTime(videoObject?.uploadDate),
+			duration: videoDetail.duration ?? -1,
+			viewCount: (userInteractionCount ? Number.parseInt(userInteractionCount) : 0),
+			url,
+			isLive,
+			description,
+			rating,
+			video: new VideoSourceDescriptor(sources),
+			live: liveStream
+		});
+
+		videoDetails.getContentRecommendations = function () {
+			return source.getContentRecommendations(url, res);
+		};
+
+		return videoDetails;
+	} finally {
+		disposeDoc(doc);
 	}
-
-	//doc.dispose();
-
-	const videoDetails = new PlatformVideoDetails({
-		id: new PlatformID(PLATFORM, id, config.id),
-		name: decodeHtmlEntities(videoDetail.title) ?? "",
-		thumbnails: new Thumbnails(thumbnails),
-		author: new PlatformAuthorLink(getAuthorIdFromUrl(authorHref.getAttribute("href")),
-		videoDetail.author.name ?? "",
-		videoDetail.author.url,
-		authorThumbnailUrl ?? null,
-		subscribers),
-		datetime: dateToUnixTime(videoObject?.uploadDate),
-		duration: videoDetail.duration ?? -1,
-		viewCount: (userInteractionCount ? Number.parseInt(userInteractionCount) : 0),
-		url,
-		isLive,
-		description,
-		rating,
-		video: new VideoSourceDescriptor(sources),
-		live: liveStream
-	});
-	
-	videoDetails.getContentRecommendations = function() {
-		return source.getContentRecommendations(url, res);
-	};
-	
-	return videoDetails;
 };
+
 source.getLiveChatWindow = function (url) {
 	const res = httpGET(url);
 	if (res.isOk) {
@@ -661,6 +677,7 @@ source.getLiveChatWindow = function (url) {
 		};
 	}
 };
+
 source.getComments = function (url) {
 	const rootNodes = [];
 	const res = httpGET({ url, useAuthenticated: true });
@@ -673,58 +690,62 @@ source.getComments = function (url) {
 
 			const userImages = getUserImageList(obj.css_libs.global);
 			const doc = domParser.parseFromString(obj.html, "text/html");
-			if (doc.getElementById("sign-in-to-see-comments") && !bridge.isLoggedIn()) {
-				throw new UnavailableException('Sign in to see comments')
-			}
-
-			const elements = doc.getElementsByClassName("comment-item");
-			for (let i = 0; i < elements.length; i++) {
-				/** @type {Element} */
-				const e = elements[i];
-
-				const classAttr = e.getAttribute("class") ?? "";
-				if (classAttr.split(/\s+/).includes("comments-create")) {
-					continue;
+			try {
+				if (doc.getElementById("sign-in-to-see-comments") && !bridge.isLoggedIn()) {
+					throw new UnavailableException('Sign in to see comments')
 				}
 
-				const author = firstByClassOrNull(e, "comments-meta-author");
-				const time = firstByClassOrNull(e, "comments-meta-post-time");
-				const text = firstByClassOrNull(e, "comment-text");
-				const thumbnail = firstByClassOrNull(e, "user-image--img");
-				const likeCount = parseInt(firstByClassOrNull(e, "rumbles-count")?.textContent ?? '0');
+				const elements = doc.getElementsByClassName("comment-item");
+				for (let i = 0; i < elements.length; i++) {
+					/** @type {Element} */
+					const e = elements[i];
 
-				const authorThumbnailUrl = userImages[getThumbnailId(thumbnail)];
+					const classAttr = e.getAttribute("class") ?? "";
+					if (classAttr.split(/\s+/).includes("comments-create")) {
+						continue;
+					}
 
-				// Depth from parent <ul class="comments-N"> (N=1 is top level).
-				let depth = 0;
-				const parentClass = e.parentNode?.getAttribute?.("class") ?? "";
-				const match = parentClass.match(/^comments-(\d+)$/);
-				if (match) {
-					const level = parseInt(match[1]);
-					depth = isNaN(level) ? 0 : Math.max(0, level - 1);
+					const author = firstByClassOrNull(e, "comments-meta-author");
+					const time = firstByClassOrNull(e, "comments-meta-post-time");
+					const text = firstByClassOrNull(e, "comment-text");
+					const thumbnail = firstByClassOrNull(e, "user-image--img");
+					const likeCount = parseInt(firstByClassOrNull(e, "rumbles-count")?.textContent ?? '0');
+
+					const authorThumbnailUrl = userImages[getThumbnailId(thumbnail)];
+
+					// Depth from parent <ul class="comments-N"> (N=1 is top level).
+					let depth = 0;
+					const parentClass = e.parentNode?.getAttribute?.("class") ?? "";
+					const match = parentClass.match(/^comments-(\d+)$/);
+					if (match) {
+						const level = parseInt(match[1]);
+						depth = isNaN(level) ? 0 : Math.max(0, level - 1);
+					}
+
+					const authorHref = asAbsoluteURL(author?.getAttribute("href"));
+
+					const node = {
+						authorName: author?.textContent ?? "",
+						authorUrl: authorHref ?? "",
+						authorUsername: e.getAttribute("data-username") ?? "",
+						authorThumbnail: asAbsoluteURL(authorThumbnailUrl) ?? "",
+						message: text?.textContent ?? "",
+						date: extractAgoText_Timestamp(time?.textContent),
+						likeCount: isNaN(likeCount) ? 0 : likeCount,
+						replies: []
+					};
+
+					lastNodePerLevel[depth] = node;
+					if (depth === 0) {
+						rootNodes.push(node);
+					} else if (lastNodePerLevel[depth - 1]) {
+						lastNodePerLevel[depth - 1].replies.push(node);
+					} else {
+						rootNodes.push(node); // orphan reply - surface rather than drop
+					}
 				}
-
-				const authorHref = asAbsoluteURL(author?.getAttribute("href"));
-
-				const node = {
-					authorName: author?.textContent ?? "",
-					authorUrl: authorHref ?? "",
-					authorUsername: e.getAttribute("data-username") ?? "",
-					authorThumbnail: asAbsoluteURL(authorThumbnailUrl) ?? "",
-					message: text?.textContent ?? "",
-					date: extractAgoText_Timestamp(time?.textContent),
-					likeCount: isNaN(likeCount) ? 0 : likeCount,
-					replies: []
-				};
-
-				lastNodePerLevel[depth] = node;
-				if (depth === 0) {
-					rootNodes.push(node);
-				} else if (lastNodePerLevel[depth - 1]) {
-					lastNodePerLevel[depth - 1].replies.push(node);
-				} else {
-					rootNodes.push(node); // orphan reply - surface rather than drop
-				}
+			} finally {
+				disposeDoc(doc);
 			}
 		}
 	}
@@ -776,22 +797,24 @@ source.getUserSubscriptions = function () {
 
 	const channelUrls = [];
 	const doc = domParser.parseFromString(res.body, "text/html");
-	const tables = doc.getElementsByTagName("table");
-	if (tables.length === 0) {
-		// No table - usually a stale-auth wall. Fail gracefully instead of crashing.
-		bridge.log("Failed to parse subscriptions page (no table found).");
-		return [];
-	}
-	const aElements = tables[0].getElementsByTagName("a");
-
-	for (let i = 0; i < aElements.length; i++) {
-		const href = aElements[i].getAttribute("href").toLowerCase();
-		if (href.startsWith("/c/") || href.startsWith("/user/")) {
-			channelUrls.push(asAbsoluteURL(href));
+	try {
+		const tables = doc.getElementsByTagName("table");
+		if (tables.length === 0) {
+			// No table - usually a stale-auth wall. Fail gracefully instead of crashing.
+			bridge.log("Failed to parse subscriptions page (no table found).");
+			return [];
 		}
-	}
+		const aElements = tables[0].getElementsByTagName("a");
 
-	//doc.dispose();
+		for (let i = 0; i < aElements.length; i++) {
+			const href = aElements[i].getAttribute("href").toLowerCase();
+			if (href.startsWith("/c/") || href.startsWith("/user/")) {
+				channelUrls.push(asAbsoluteURL(href));
+			}
+		}
+	} finally {
+		disposeDoc(doc);
+	}
 	return channelUrls;
 }
 
@@ -1214,44 +1237,31 @@ function getVideosPager(url, params, author) {
 
 	const res = httpGET(`${url}${buildQuery(params)}`);
 
-	if (res.code == 200) {
-		const doc = domParser.parseFromString(res.body, "text/html");
+	if (res.code !== 200) {
+		return new VideoPager([], false);
+	}
 
+	const doc = domParser.parseFromString(res.body, "text/html");
+	try {
 		const results = [];
 		const authorImages = getAuthorImageList(res.body);
-		{
-			const elements = doc.getElementsByClassName("video-listing-entry");
-			const r = parseVideoListingEntries(authorImages, elements);
-			results.push(...r);
-		}
+		results.push(...parseVideoListingEntries(authorImages, doc.getElementsByClassName("video-listing-entry")));
+		results.push(...parseVideoStreams(doc.querySelectorAll(".thumbnail__grid .videostream"), author));
+		results.push(...parseChannelJsonVideos(res.body, author));
 
-		{
-			const elements = doc.querySelectorAll(".thumbnail__grid .videostream");
-			const r = parseVideoStreams(elements, author);
-			results.push(...r);
-		}
-
-		{
-			const r = parseChannelJsonVideos(res.body, author);
-			results.push(...r);
-		}
-
-		const page = params.page ?? 1;
 		let hasMore = false;
-		const headLinks = doc.querySelectorAll("link[rel='next']");		
+		const headLinks = doc.querySelectorAll("link[rel='next']");
 		for (let i = 0; i < headLinks.length; i++) {
-			const link = headLinks[i];
-			if (link.getAttribute("rel") === "next") {
+			if (headLinks[i].getAttribute("rel") === "next") {
 				hasMore = true;
 				break;
 			}
 		}
 
-		//doc.dispose();
 		return new RumbleVideoPager(results, hasMore, url, params, author);
+	} finally {
+		disposeDoc(doc);
 	}
-
-	return new VideoPager([], false);
 }
 
 /**
@@ -1714,6 +1724,16 @@ function throwIfCaptcha(resp) {
         }
     }
     return true;
+}
+
+// Release a parsed DOM's native resources. dispose() is only safely callable on
+// Android (Javet) for now, where it clears the child-wrapper graph. On Desktop
+// (ClearScript) the bound method takes a parameter and throws on a 0-arg call,
+// and is a no-op there anyway - so only dispose on Android for now.
+function disposeDoc(doc) {
+	if (IS_ANDROID) {
+		doc?.dispose();
+	}
 }
 
 log("LOADED");
