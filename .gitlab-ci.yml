@@ -1,9 +1,26 @@
 stages:
-- deploy
+  - deploy
 
-deploy:
+variables:
+  PLUGIN_NAME: Rumble
+  ICON_FILE: rumble.png
+  SCRIPT_FILE: RumbleScript.js
+  CONFIG_FILE: RumbleConfig.json
+
+deploy-master:
   stage: deploy
+  variables:
+    PRE_RELEASE: "false"
   script:
     - sh deploy.sh
   only:
     - master
+
+deploy-dev:
+  stage: deploy
+  variables:
+    PRE_RELEASE: "true"
+  script:
+    - sh deploy.sh
+  only:
+    - dev
