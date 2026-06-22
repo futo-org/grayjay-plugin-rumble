@@ -15,6 +15,28 @@ const USER_AGENT_DESKTOP = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (
 const USER_AGENT_FALLBACK = IS_DESKTOP ? USER_AGENT_DESKTOP : USER_AGENT_MOBILE;
 const getUserAgent = () => bridge.authUserAgent ?? bridge.captchaUserAgent ?? USER_AGENT_FALLBACK;
 
+// Bundled curl-impersonate Chrome profiles; closest major to the WebView UA is picked (see pickImpersonateProfile).
+const CHROME_IMPERSONATE_TARGETS = [
+	{ major: 99,  target: "chrome99_android",  android: true },
+	{ major: 131, target: "chrome131_android", android: true },
+	{ major: 100, target: "chrome100" },
+	{ major: 101, target: "chrome101" },
+	{ major: 104, target: "chrome104" },
+	{ major: 107, target: "chrome107" },
+	{ major: 110, target: "chrome110" },
+	{ major: 116, target: "chrome116" },
+	{ major: 119, target: "chrome119" },
+	{ major: 120, target: "chrome120" },
+	{ major: 123, target: "chrome123" },
+	{ major: 124, target: "chrome124" },
+	{ major: 131, target: "chrome131" },
+	{ major: 133, target: "chrome133a" },
+	{ major: 136, target: "chrome136" },
+	{ major: 142, target: "chrome142" }
+];
+
+const DEFAULT_IMPERSONATE_TARGET = IS_ANDROID ? "chrome131_android" : "chrome136";
+
 const REGEX_HUMAN_AGO = new RegExp("([0-9]*) ([a-zA-Z]*) ago");
 const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
 const REGEX_USER_IMAGE = /user-image--img--id-([0-9a-z]+)/;
@@ -105,9 +127,9 @@ let config = {};
 let settings = {};
 
 let state = {
-	defaultHeaders: {
-		'User-Agent': getUserAgent(),
-	}
+	defaultHeaders: {},
+	// Throttle timestamp for the "network changed" toast (see maybeShowNetworkToast).
+	lastDnsToastMs: 0
 };
 
 const reservedUrls = [
@@ -147,19 +169,11 @@ source.enable = function (conf, setts, saveStateStr) {
 
 	if (saveStateStr) {
 		state = JSON.parse(saveStateStr);
-	} else if (settings.useIpifyForRNSC) {
+	}
 
-		try {
-			const res = httpGET({
-				url: 'https://api.ipify.org',
-				headers: {}
-			});	
-			if (res.isOk) {
-				state.defaultHeaders.Cookie = `RNSC=${res.body};`;
-			}
-		} catch (error) {
-			bridge.log("Failed to get IP address from ipify.org " + error);
-		}
+	// RNSC must equal the current client IP, never persisted state (goes stale on VPN switch).
+	if (settings.useIpifyForRNSC) {
+		refreshRnscCookie();
 	}
 }
 
@@ -168,6 +182,7 @@ source.saveState = () => {
 };
 
 source.getHome = function () {
+	refreshRnscIfChanged();
 	return getVideosPager(URL_VIDEOS, {
 		sort: "views",
 		date: "today"
@@ -1662,15 +1677,26 @@ function httpGET(optionsOrUrl) {
 
 	let lastError;
 	let attempts = retries + 1; // +1 for the initial attempt
+	let rnscRefreshed = false;   // re-derive the RNSC IP at most once per call (see redirect handling)
 
 	while (attempts > 0) {
 		try {
-			const localHeaders = headers ?? state.defaultHeaders;
+			const userAgent = getUserAgent();
+			const localHeaders = {
+				...(headers ?? state.defaultHeaders),
+				'User-Agent': userAgent
+			};
 
-			const resp = http.GET(
+			// Replay with the WebView's TLS fingerprint. Android needs it set on the client
+			// (options arg arrives null); Desktop honors the arg.
+			const impOptions = impersonateOptionsFor(userAgent);
+			applyImpersonation(impOptions);
+			const resp = httpimp.GET(
 				url,
 				localHeaders,
-				useAuthenticated
+				useAuthenticated,
+				false,
+				impOptions
 			);
 
 			if (!resp.isOk) {
@@ -1701,7 +1727,22 @@ function httpGET(optionsOrUrl) {
 			attempts--;
 
 			if (attempts > 0) {
-				bridge.sleep(100);
+				if (isRedirectLoopError(error) && !rnscRefreshed && settings.useIpifyForRNSC && !headers) {
+					// Stale RNSC IP (VPN switch) redirect-loops; re-derive once and retry. `!headers`
+					// scopes this to default-header requests and blocks fetchClientIp recursion.
+					rnscRefreshed = true;
+					maybeShowNetworkToast();
+					refreshRnscCookie();
+					bridge.sleep(100);
+				} else if (isTransientNetworkError(error)) {
+					// Transient drop after a VPN switch; escalating backoff (~8s total) to ride it out.
+					maybeShowNetworkToast();
+					const attemptIndex = (retries + 1) - attempts;
+					// Exponential backoff: 400ms doubling per retry (400/800/1600...), capped at 2.5s.
+					bridge.sleep(Math.min(2500, 400 * Math.pow(2, attemptIndex - 1)));
+				} else {
+					bridge.sleep(100);
+				}
 			}
 
 			if (attempts === 0) {
@@ -1733,6 +1774,137 @@ function throwIfCaptcha(resp) {
 function disposeDoc(doc) {
 	if (IS_ANDROID) {
 		doc?.dispose();
+	}
+}
+
+
+// Closest Chrome-major profile to the WebView UA; ties prefer *_android.
+function pickImpersonateProfile(userAgent) {
+	const m = /Chrome\/(\d+)/.exec(userAgent || "");
+	if (!m) return { target: DEFAULT_IMPERSONATE_TARGET, android: IS_ANDROID };
+	const major = parseInt(m[1], 10);
+	let best = null;
+	let bestDist = Infinity;
+	for (const c of CHROME_IMPERSONATE_TARGETS) {
+		const dist = Math.abs(c.major - major);
+		if (dist < bestDist || (dist === bestDist && c.android && !(best && best.android))) {
+			best = c;
+			bestDist = dist;
+		}
+	}
+	return best ? { target: best.target, android: !!best.android } : { target: DEFAULT_IMPERSONATE_TARGET, android: IS_ANDROID };
+}
+
+// Android version-matches the target (TLS must match the captcha-solving client); Desktop is fixed.
+function impersonateOptionsFor(userAgent) {
+	if (!IS_ANDROID) {
+		return { impersonateTarget: DEFAULT_IMPERSONATE_TARGET };
+	}
+	const profile = pickImpersonateProfile(userAgent);
+	return { impersonateTarget: profile.target, useBuiltInHeaders: true };
+}
+
+// Android only: options arg arrives null over the Javet bridge, so set the target on the clients.
+function applyImpersonation(opts) {
+	if (!IS_ANDROID)
+		return;
+	for (const withAuth of [false, true]) {
+		const client = httpimp.getDefaultClient(withAuth);
+		client.setDefaultImpersonateTarget(opts.impersonateTarget);
+		client.setUseBuiltInHeaders(opts.useBuiltInHeaders !== false);
+	}
+}
+
+// Parse a Cloudflare `cdn-cgi/trace` body ("key=value" lines) into an object.
+function parseTrace(body) {
+	const out = {};
+	for (const line of String(body ?? "").split("\n")) {
+		const i = line.indexOf("=");
+		if (i > 0) out[line.substring(0, i).trim()] = line.substring(i + 1).trim();
+	}
+	return out;
+}
+
+// Single owner of the RNSC cookie format: it must equal the client's current IP.
+function setRnscCookie(ip) {
+	state.defaultHeaders.Cookie = `RNSC=${ip};`;
+}
+
+// Read the IP currently stored in the RNSC cookie, or null if none is set.
+function getRnscIp() {
+	const m = /RNSC=([^;]+)/.exec(state.defaultHeaders.Cookie || "");
+	return m ? m[1] : null;
+}
+
+// Resolve the client IP from rumble.com/cdn-cgi/trace (the IP Rumble's edge sees), ipify fallback.
+// try/catch keeps a challenged trace from triggering a captcha in enable. Null if both fail.
+function fetchClientIp() {
+	try {
+		const res = httpGET({ url: 'https://rumble.com/cdn-cgi/trace', headers: {} });
+		if (res?.isOk && res.body) {
+			const t = parseTrace(res.body);
+			bridge.log(`RNSC trace ip=${t.ip} kex=${t.kex} tls=${t.tls} http=${t.http} loc=${t.loc} warp=${t.warp} colo=${t.colo} uag=${t.uag}`);
+			if (t.ip) return t.ip;
+		}
+	} catch (error) {
+		bridge.log("RNSC IP lookup via cdn-cgi/trace failed, falling back to ipify: " + error);
+	}
+
+	try {
+		const res = httpGET({ url: 'https://api.ipify.org', headers: {} });
+		if (res?.isOk && res.body) return String(res.body).trim();
+	} catch (error) {
+		bridge.log("RNSC IP lookup via ipify failed: " + error);
+	}
+	return null;
+}
+
+// Re-derive the RNSC cookie from the current client IP. Returns the ip, or null if lookup failed.
+function refreshRnscCookie() {
+	const ip = fetchClientIp();
+	if (ip) {
+		setRnscCookie(ip);
+	}
+	return ip;
+}
+
+// Proactively refresh the RNSC cookie if the client IP changed (VPN switch), before the request -
+// so Rumble does not redirect-loop on a stale IP. Toasts only when the IP actually changed.
+function refreshRnscIfChanged() {
+	if (!settings.useIpifyForRNSC) {
+		return;
+	}
+	const ip = fetchClientIp();
+	if (!ip) {
+		return;
+	}
+	const currentIp = getRnscIp();
+	if (currentIp && currentIp !== ip) {
+		maybeShowNetworkToast();
+	}
+	if (currentIp !== ip) {
+		setRnscCookie(ip);
+	}
+}
+
+// Transient curl transport failure (DNS/connect/recv/timeout); excludes the redirect-loop symptom.
+function isTransientNetworkError(error) {
+	const msg = String(error?.message ?? error ?? "");
+	return /curl_easy_perform failed/i.test(msg) && !/redirect/i.test(msg);
+}
+
+// curl "too many redirects" failure; on Rumble this means a stale RNSC IP that re-deriving fixes.
+function isRedirectLoopError(error) {
+	const msg = String(error?.message ?? error ?? "");
+	return /curl_easy_perform failed/i.test(msg) && /redirect/i.test(msg);
+}
+
+// Throttled "network changed" toast, shared by the transient-retry and RNSC-refresh paths.
+function maybeShowNetworkToast() {
+	const now = Date.now();
+	if (now - (state.lastDnsToastMs || 0) > 5000) {
+		bridge.toast("Network changed - reconnecting...");
+		state.lastDnsToastMs = now;
 	}
 }
 

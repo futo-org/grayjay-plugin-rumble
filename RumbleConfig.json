@@ -13,8 +13,11 @@
 	"subscriptionRateLimit": 50,
 	"scriptSignature": "",
 	"scriptPublicKey": "",
-	"packages": ["Http","DOMParser"],
-	
+	"packages": [
+		"Http",
+		"HttpImp",
+		"DOMParser"
+	],
 	"allowEval": false,
 	"allowUrls": [
 		"rumble.com",
@@ -42,8 +45,8 @@
 		},
 		{
 			"variable": "useIpifyForRNSC",
-			"name": "Use ipify.org",
-			"description": "Enable this option to use ipify.org to get the IP address to set RNSC Cookie.",
+			"name": "Set RNSC cookie from client IP",
+			"description": "Enable this to detect the client IP and set the RNSC cookie (required in some regions). The IP is read from rumble.com (Cloudflare edge), falling back to ipify.org.",
 			"type": "Boolean",
 			"default": "true"
 		}
@@ -67,7 +70,8 @@
 		"captchaUrl": null,
 		"cookiesToFind": [
 			"cf_clearance"
-		]
+		],
+		"cookiesExclOthers": false
 	},
 	"captchaDesktop": {
 		"userAgent": null,
@@ -75,6 +79,7 @@
 		"cookiesToFind": [
 			"cf_clearance"
 		],
+		"cookiesExclOthers": false,
 		"useMobileEmulation": false
 	},
 	"supportedClaimTypes": [4],
