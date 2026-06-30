@@ -129,7 +129,9 @@ let settings = {};
 let state = {
 	defaultHeaders: {},
 	// Throttle timestamp for the "network changed" toast (see maybeShowNetworkToast).
-	lastDnsToastMs: 0
+	lastDnsToastMs: 0,
+	// Throttle timestamp for the captcha-loop toast (see noteCaptchaChallenge).
+	lastCaptchaToastMs: 0
 };
 
 const reservedUrls = [
@@ -1691,6 +1693,7 @@ function httpGET(optionsOrUrl) {
 			// (options arg arrives null); Desktop honors the arg.
 			const impOptions = impersonateOptionsFor(userAgent);
 			applyImpersonation(impOptions);
+			bridge.log("RUMBLEUA url=" + url + " ua=[" + userAgent + "] cap=[" + (bridge.captchaUserAgent ?? "null") + "] auth=[" + (bridge.authUserAgent ?? "null") + "] target=" + (impOptions.impersonateTarget ?? "?"));
 			const resp = httpimp.GET(
 				url,
 				localHeaders,
@@ -1761,10 +1764,26 @@ function throwIfCaptcha(resp) {
 
 		// Check for Cloudflare captcha
         if (/Just a moment\.\.\./i.test(resp.body)) {
+            noteCaptchaChallenge();
             throw new CaptchaRequiredException(resp.url, resp.body);
         }
     }
     return true;
+}
+
+// Detect a captcha LOOP: being challenged again even though a captcha was ALREADY solved means the
+// cf_clearance is stale (e.g. the exit IP changed). bridge.captchaUserAgent is set once a captcha is
+// solved and is descriptor-backed, so it survives the captcha-recreate that resets plugin `state` -
+// making it the only reliable signal here. The plugin can't clear its own captcha, so guide the
+// user (throttled best-effort; the throttle may reset on recreate, which is acceptable).
+function noteCaptchaChallenge() {
+	if (!bridge.captchaUserAgent)
+		return;
+	const now = Date.now();
+	if (now - (state.lastCaptchaToastMs || 0) > 60000) {
+		bridge.toast("Rumble captcha keeps failing (your IP may have changed). Delete this source's saved captcha, then solve again.");
+		state.lastCaptchaToastMs = now;
+	}
 }
 
 // Release a parsed DOM's native resources. dispose() is only safely callable on
