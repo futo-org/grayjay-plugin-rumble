@@ -7,7 +7,7 @@
 	"sourceUrl": "https://plugins.grayjay.app/Rumble/RumbleConfig.json",
 	"repositoryUrl": "https://gitlab.futo.org/videostreaming/plugins/rumble",
 	"scriptUrl": "./RumbleScript.js",
-	"version": 68,
+	"version": 69,
 	"iconUrl": "./rumble.png",
 	"id": "2ce7b35e-d2b2-4adb-a728-a34a30d30359",
 	"subscriptionRateLimit": 50,
@@ -148,6 +148,13 @@
 			"Improvement: Add subscription rate limit;",
 			"Improvement: Skip redundant channel about-page fetch when loading channel videos;",
 			"Improvement: Dispose parsed HTML documents on Android to reduce memory pressure;"
+		],
+		"69": [
+			"Fix: Cloudflare captcha loop by matching the browser TLS fingerprint of the client that solved the captcha, on both Android and Desktop;",
+			"Improvement: Set the RNSC cookie from the current client IP (read from Rumble's edge, ipify fallback) and refresh it when the IP changes;",
+			"Improvement: Recover from network/VPN changes with retry backoff and a notice, and fix the too-many-requests redirect loop by re-deriving the IP;",
+			"Improvement: Notify to delete the saved captcha when it keeps looping (usually after an IP change);",
+			"Improvement: Add an advanced setting to toggle the impersonated HTTP client (HttpImp);"
 		]
 	}
 }
