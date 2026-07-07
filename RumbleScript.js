@@ -1693,8 +1693,8 @@ function httpGET(optionsOrUrl) {
 			// useHttpImp toggle OFF routes through plain http (debug only; may be re-challenged).
 			let resp;
 			if (settings.useHttpImp !== false) {
-			const impOptions = impersonateOptionsFor(userAgent);
-			applyImpersonation(impOptions);
+				const impOptions = impersonateOptionsFor(userAgent);
+				applyImpersonation(impOptions);
 				resp = httpimp.GET(url, localHeaders, useAuthenticated, false, impOptions);
 			} else {
 				resp = http.GET(url, localHeaders, useAuthenticated);
@@ -1812,12 +1812,13 @@ function pickImpersonateProfile(userAgent) {
 	return best ? { target: best.target, android: !!best.android } : { target: DEFAULT_IMPERSONATE_TARGET, android: IS_ANDROID };
 }
 
-// Android version-matches the target (TLS must match the captcha-solving client); Desktop is fixed.
+// Version-match the impersonate target to the captcha-solving Chrome major (cf_clearance is JA3-bound).
+// Android also needs useBuiltInHeaders + the client-setter path (options arg dropped over the bridge).
 function impersonateOptionsFor(userAgent) {
-	if (!IS_ANDROID) {
-		return { impersonateTarget: DEFAULT_IMPERSONATE_TARGET };
-	}
 	const profile = pickImpersonateProfile(userAgent);
+	if (!IS_ANDROID) {
+		return { impersonateTarget: profile.target };
+	}
 	return { impersonateTarget: profile.target, useBuiltInHeaders: true };
 }
 
