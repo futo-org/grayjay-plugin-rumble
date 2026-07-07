@@ -1689,18 +1689,16 @@ function httpGET(optionsOrUrl) {
 				'User-Agent': userAgent
 			};
 
-			// Replay with the WebView's TLS fingerprint. Android needs it set on the client
-			// (options arg arrives null); Desktop honors the arg.
+			// Impersonate the captcha-solving client's TLS fingerprint (cf_clearance is JA3-bound).
+			// useHttpImp toggle OFF routes through plain http (debug only; may be re-challenged).
+			let resp;
+			if (settings.useHttpImp !== false) {
 			const impOptions = impersonateOptionsFor(userAgent);
 			applyImpersonation(impOptions);
-			bridge.log("RUMBLEUA url=" + url + " ua=[" + userAgent + "] cap=[" + (bridge.captchaUserAgent ?? "null") + "] auth=[" + (bridge.authUserAgent ?? "null") + "] target=" + (impOptions.impersonateTarget ?? "?"));
-			const resp = httpimp.GET(
-				url,
-				localHeaders,
-				useAuthenticated,
-				false,
-				impOptions
-			);
+				resp = httpimp.GET(url, localHeaders, useAuthenticated, false, impOptions);
+			} else {
+				resp = http.GET(url, localHeaders, useAuthenticated);
+			}
 
 			if (!resp.isOk) {
 

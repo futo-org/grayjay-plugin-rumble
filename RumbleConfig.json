@@ -49,6 +49,20 @@
 			"description": "Enable this to detect the client IP and set the RNSC cookie (required in some regions). The IP is read from rumble.com (Cloudflare edge), falling back to ipify.org.",
 			"type": "Boolean",
 			"default": "true"
+		},
+		{
+			"variable": "advanced",
+			"name": "Advanced",
+			"description": "These are settings not intended for most users, but may help development or power users.",
+			"type": "Header"
+		},
+		{
+			"variable": "useHttpImp",
+			"name": "Use impersonated HTTP client (recommended)",
+			"description": "Routes requests through the curl-impersonate (HttpImp) client so they match the browser fingerprint that solved the Cloudflare captcha. Disable only for debugging - with it off, captcha-protected requests may be re-challenged.",
+			"type": "Boolean",
+			"default": "true",
+			"isAdvanced": "true"
 		}
 	],
 	
