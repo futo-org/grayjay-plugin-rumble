@@ -267,7 +267,7 @@ source.search = function (query, type, order, filters) {
 };
 
 function getChannelsPage(query, page = null) {
-	const url = URL_SEARCH_CHANNEL + query + (page ? `&page=${page}` : "");
+	const url = URL_SEARCH_CHANNEL + encodeURIComponent(query) + (page ? `&page=${page}` : "");
 	const res = httpGET(url);
 	if (!res.isOk) {
 		return [];
@@ -1426,7 +1426,8 @@ function buildQuery(params) {
 				query += "&";
 			}
 
-			query += `${key}=${value}`;
+			// Encode values: libcurl rejects raw spaces (search queries) as a malformed URL.
+			query += `${key}=${encodeURIComponent(value)}`;
 		}
 	}
 
@@ -1914,9 +1915,13 @@ function refreshRnscIfChanged() {
 	}
 }
 
-// Transient curl transport failure (DNS/connect/recv/timeout); excludes the redirect-loop symptom.
+// Transient curl transport failure (DNS/connect/recv/timeout); excludes the redirect-loop symptom
+// and malformed URLs, which are a plugin bug that neither retrying nor reconnecting can fix.
 function isTransientNetworkError(error) {
 	const msg = String(error?.message ?? error ?? "");
+	if (/bad\/illegal format|missing URL/i.test(msg)) {
+		return false;
+	}
 	return /curl_easy_perform failed/i.test(msg) && !/redirect/i.test(msg);
 }
 
