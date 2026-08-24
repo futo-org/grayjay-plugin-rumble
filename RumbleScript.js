@@ -1680,6 +1680,9 @@ function httpGET(optionsOrUrl) {
 	let lastError;
 	let attempts = retries + 1; // +1 for the initial attempt
 	let rnscRefreshed = false;   // re-derive the RNSC IP at most once per call (see redirect handling)
+	// Cloudflare challenges come in short transient waves; retry briefly before surfacing a captcha.
+	const challengeRetryDelaysMs = [800, 1600];
+	let challengeRetryIndex = 0;
 
 	while (attempts > 0) {
 		try {
@@ -1719,9 +1722,16 @@ function httpGET(optionsOrUrl) {
 		} catch (error) {
 			lastError = error;
 
-			// Don't retry captcha exceptions - they require manual intervention
 			if (error instanceof CaptchaRequiredException) {
+				if (challengeRetryIndex < challengeRetryDelaysMs.length) {
+					bridge.sleep(challengeRetryDelaysMs[challengeRetryIndex]);
+					challengeRetryIndex++;
+					continue;
+				}
+
+				// Persistent challenge - surface the captcha for manual solving
 				log(`Captcha detected for request: ${url}`);
+				noteCaptchaChallenge();
 				throw error;
 			}
 
@@ -1760,9 +1770,8 @@ function httpGET(optionsOrUrl) {
 function throwIfCaptcha(resp) {
     if (resp?.body && resp?.code == 403) {
 
-		// Check for Cloudflare captcha
+		// Check for Cloudflare captcha (loop-toast handled in httpGET once retries are exhausted)
         if (/Just a moment\.\.\./i.test(resp.body)) {
-            noteCaptchaChallenge();
             throw new CaptchaRequiredException(resp.url, resp.body);
         }
     }

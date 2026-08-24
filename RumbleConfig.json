@@ -154,7 +154,8 @@
 			"Improvement: Set the RNSC cookie from the current client IP (read from Rumble's edge, ipify fallback) and refresh it when the IP changes;",
 			"Improvement: Recover from network/VPN changes with retry backoff and a notice, and fix the too-many-requests redirect loop by re-deriving the IP;",
 			"Improvement: Notify to delete the saved captcha when it keeps looping (usually after an IP change);",
-			"Improvement: Add an advanced setting to toggle the impersonated HTTP client (HttpImp);"
+			"Improvement: Add an advanced setting to toggle the impersonated HTTP client (HttpImp);",
+			"Fix: Absorb transient Cloudflare challenges by retrying briefly before showing the captcha;"
 		]
 	}
 }
