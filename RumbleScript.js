@@ -15,27 +15,21 @@ const USER_AGENT_DESKTOP = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (
 const USER_AGENT_FALLBACK = IS_DESKTOP ? USER_AGENT_DESKTOP : USER_AGENT_MOBILE;
 const getUserAgent = () => bridge.authUserAgent ?? bridge.captchaUserAgent ?? USER_AGENT_FALLBACK;
 
-// Bundled curl-impersonate Chrome profiles; closest major to the WebView UA is picked (see pickImpersonateProfile).
-const CHROME_IMPERSONATE_TARGETS = [
-	{ major: 99,  target: "chrome99_android",  android: true },
-	{ major: 131, target: "chrome131_android", android: true },
-	{ major: 100, target: "chrome100" },
-	{ major: 101, target: "chrome101" },
-	{ major: 104, target: "chrome104" },
-	{ major: 107, target: "chrome107" },
-	{ major: 110, target: "chrome110" },
-	{ major: 116, target: "chrome116" },
-	{ major: 119, target: "chrome119" },
-	{ major: 120, target: "chrome120" },
-	{ major: 123, target: "chrome123" },
-	{ major: 124, target: "chrome124" },
-	{ major: 131, target: "chrome131" },
-	{ major: 133, target: "chrome133a" },
-	{ major: 136, target: "chrome136" },
-	{ major: 142, target: "chrome142" }
-];
+// Same on both platforms: chrome131_android shares Chrome's cipher list but a distinct JA4
+// extension hash, and it is challenged where chrome136 is not (4/20 vs 19/20, one exit).
+const DEFAULT_IMPERSONATE_TARGET = "chrome136";
 
-const DEFAULT_IMPERSONATE_TARGET = IS_ANDROID ? "chrome131_android" : "chrome136";
+// Cloudflare challenges every BoringSSL-cipher fingerprint (all Chrome profiles) on flagged
+// IPs; Firefox and Safari pass. Ordered by pass rate measured against rumble.com 2026-08-26
+// on three exits (n=10 each): firefox133 10/10 on all, safari17_0 9-10, firefox144 5-10.
+const IMPERSONATE_CHAIN = ["firefox133", "safari17_0", "firefox144", DEFAULT_IMPERSONATE_TARGET];
+
+// Values of the impersonateTargetIndex setting; index 0 means "Automatic" (use the chain).
+const IMPERSONATE_TARGET_OPTIONS = [null, ...IMPERSONATE_CHAIN];
+
+// Targets this app build's bundled curl-impersonate does not know. Session-scoped on purpose:
+// it is a property of the installed build, and re-probing after an app update is cheap.
+const unsupportedTargets = new Set();
 
 const REGEX_HUMAN_AGO = new RegExp("([0-9]*) ([a-zA-Z]*) ago");
 const REGEX_USER_IMAGE_CSS = /i.user-image--img--id-([0-9a-z]+)\s*\{\s*background-image:\s+url\("?([^"\)]+)"?\)/g;
@@ -131,7 +125,9 @@ let state = {
 	// Throttle timestamp for the "network changed" toast (see maybeShowNetworkToast).
 	lastDnsToastMs: 0,
 	// Throttle timestamp for the captcha-loop toast (see noteCaptchaChallenge).
-	lastCaptchaToastMs: 0
+	lastCaptchaToastMs: 0,
+	// Last impersonation target that got past Cloudflare; read defensively, older saved state lacks it.
+	impersonateTarget: null
 };
 
 const reservedUrls = [
@@ -1681,9 +1677,12 @@ function httpGET(optionsOrUrl) {
 	let lastError;
 	let attempts = retries + 1; // +1 for the initial attempt
 	let rnscRefreshed = false;   // re-derive the RNSC IP at most once per call (see redirect handling)
-	// Cloudflare challenges come in short transient waves; retry briefly before surfacing a captcha.
-	const challengeRetryDelaysMs = [800, 1600];
+	// A challenged fingerprint is retried on the next candidate first; the delay only applies once
+	// the whole chain has been rejected, to ride out a transient wave before surfacing a captcha.
+	const challengeRetryDelaysMs = [1200];
 	let challengeRetryIndex = 0;
+	let candidates = impersonateCandidates();
+	let candidateIndex = 0;
 
 	while (attempts > 0) {
 		try {
@@ -1693,11 +1692,12 @@ function httpGET(optionsOrUrl) {
 				'User-Agent': userAgent
 			};
 
-			// Impersonate the captcha-solving client's TLS fingerprint (cf_clearance is JA3-bound).
+			// Cloudflare challenges Chrome's TLS fingerprint on flagged IPs, so walk IMPERSONATE_CHAIN.
 			// useHttpImp toggle OFF routes through plain http (debug only; may be re-challenged).
 			let resp;
+			const target = candidates[candidateIndex];
 			if (settings.useHttpImp !== false) {
-				const impOptions = impersonateOptionsFor(userAgent);
+				const impOptions = impersonateOptionsFor(target);
 				applyImpersonation(impOptions);
 				resp = httpimp.GET(url, localHeaders, useAuthenticated, false, impOptions);
 			} else {
@@ -1709,6 +1709,11 @@ function httpGET(optionsOrUrl) {
 				throwIfCaptcha(resp);
 				
 				throw new ScriptException("Request [" + url + "] failed with code [" + resp.code + "]");
+			}
+
+			// Remember what got through so later requests skip straight to it.
+			if (settings.useHttpImp !== false && state.impersonateTarget !== target) {
+				state.impersonateTarget = target;
 			}
 
 			if (parseResponse) {
@@ -1724,15 +1729,49 @@ function httpGET(optionsOrUrl) {
 			lastError = error;
 
 			if (error instanceof CaptchaRequiredException) {
+				// A different fingerprint does not need to wait out a wave - rotate immediately.
+				if (candidateIndex < candidates.length - 1) {
+					if (state.impersonateTarget === candidates[candidateIndex]) {
+						state.impersonateTarget = null;
+					}
+					candidateIndex++;
+					continue;
+				}
+
+				// Every fingerprint was challenged; the exit itself is likely blocked. Wait once and
+				// walk the chain again in case this is a transient wave.
 				if (challengeRetryIndex < challengeRetryDelaysMs.length) {
 					bridge.sleep(challengeRetryDelaysMs[challengeRetryIndex]);
 					challengeRetryIndex++;
+					candidateIndex = 0;
 					continue;
 				}
 
 				// Persistent challenge - surface the captcha for manual solving
 				log(`Captcha detected for request: ${url}`);
 				noteCaptchaChallenge();
+				throw error;
+			}
+
+			// An older app build's library does not know this target. Drop it and retry at once -
+			// that is a capability mismatch, not a network failure, so it must not cost an attempt.
+			if (isUnsupportedTargetError(error)) {
+				const missing = candidates[candidateIndex];
+				log(`Impersonate target [${missing}] unsupported by this build; falling back`);
+				unsupportedTargets.add(missing);
+				if (state.impersonateTarget === missing) {
+					state.impersonateTarget = null;
+				}
+				candidates = candidates.filter(c => c !== missing);
+				if (candidates.length === 0 && !unsupportedTargets.has(DEFAULT_IMPERSONATE_TARGET)) {
+					// A pinned setting can name a target this build lacks; the platform default is
+					// the one target every build ships, so fall back to it rather than failing.
+					candidates = [DEFAULT_IMPERSONATE_TARGET];
+				}
+				if (candidates.length > 0) {
+					candidateIndex = Math.min(candidateIndex, candidates.length - 1);
+					continue;
+				}
 				throw error;
 			}
 
@@ -1779,17 +1818,17 @@ function throwIfCaptcha(resp) {
     return true;
 }
 
-// Detect a captcha LOOP: being challenged again even though a captcha was ALREADY solved means the
-// cf_clearance is stale (e.g. the exit IP changed). bridge.captchaUserAgent is set once a captcha is
-// solved and is descriptor-backed, so it survives the captcha-recreate that resets plugin `state` -
-// making it the only reliable signal here. The plugin can't clear its own captcha, so guide the
-// user (throttled best-effort; the throttle may reset on recreate, which is acceptable).
+// Reached only once every fingerprint in IMPERSONATE_CHAIN was challenged, which means the exit
+// itself is distrusted rather than the captcha being stale - solving it again cannot help.
+// bridge.captchaUserAgent gates this to users who already solved one: without it the app's own
+// captcha prompt is the right response and a toast is noise. Throttled best-effort; the throttle
+// may reset on captcha-recreate, which is acceptable.
 function noteCaptchaChallenge() {
 	if (!bridge.captchaUserAgent)
 		return;
 	const now = Date.now();
 	if (now - (state.lastCaptchaToastMs || 0) > 60000) {
-		bridge.toast("Rumble captcha keeps failing (your IP may have changed). Delete this source's saved captcha, then solve again.");
+		bridge.toast("Rumble is blocking this connection. This is common on VPN and datacenter IPs - try a different VPN exit or disable the VPN for Rumble.");
 		state.lastCaptchaToastMs = now;
 	}
 }
@@ -1805,31 +1844,41 @@ function disposeDoc(doc) {
 }
 
 
-// Closest Chrome-major profile to the WebView UA; ties prefer *_android.
-function pickImpersonateProfile(userAgent) {
-	const m = /Chrome\/(\d+)/.exec(userAgent || "");
-	if (!m) return { target: DEFAULT_IMPERSONATE_TARGET, android: IS_ANDROID };
-	const major = parseInt(m[1], 10);
-	let best = null;
-	let bestDist = Infinity;
-	for (const c of CHROME_IMPERSONATE_TARGETS) {
-		const dist = Math.abs(c.major - major);
-		if (dist < bestDist || (dist === bestDist && c.android && !(best && best.android))) {
-			best = c;
-			bestDist = dist;
-		}
+// Ordered targets to try for one request. A pinned setting disables rotation entirely; on
+// Automatic the last known-good target goes first, so the steady state is a single request.
+function impersonateCandidates() {
+	// Nothing to rotate when requests do not go through curl-impersonate at all.
+	if (settings.useHttpImp === false) {
+		return [DEFAULT_IMPERSONATE_TARGET];
 	}
-	return best ? { target: best.target, android: !!best.android } : { target: DEFAULT_IMPERSONATE_TARGET, android: IS_ANDROID };
+	const pinned = IMPERSONATE_TARGET_OPTIONS[parseInt(settings.impersonateTargetIndex ?? 0, 10)];
+	if (pinned) {
+		// A pin this build's library lacks would otherwise re-probe on every single request.
+		return unsupportedTargets.has(pinned) ? [DEFAULT_IMPERSONATE_TARGET] : [pinned];
+	}
+	const candidates = [];
+	for (const target of [state.impersonateTarget, ...IMPERSONATE_CHAIN]) {
+		if (!target || candidates.includes(target) || unsupportedTargets.has(target)) {
+			continue;
+		}
+		candidates.push(target);
+	}
+	// Everything known has been rejected by this build's library; try the platform default anyway.
+	return candidates.length > 0 ? candidates : [DEFAULT_IMPERSONATE_TARGET];
 }
 
-// Version-match the impersonate target to the captcha-solving Chrome major (cf_clearance is JA3-bound).
+// The bundled curl-impersonate hard-errors on a target it does not know (an older app build
+// may predate a profile), on Android via error() and on Desktop via InvalidOperationException.
+function isUnsupportedTargetError(error) {
+	return /impersonate/i.test(String(error?.message ?? error ?? ""));
+}
+
 // Android also needs useBuiltInHeaders + the client-setter path (options arg dropped over the bridge).
-function impersonateOptionsFor(userAgent) {
-	const profile = pickImpersonateProfile(userAgent);
+function impersonateOptionsFor(target) {
 	if (!IS_ANDROID) {
-		return { impersonateTarget: profile.target };
+		return { impersonateTarget: target };
 	}
-	return { impersonateTarget: profile.target, useBuiltInHeaders: true };
+	return { impersonateTarget: target, useBuiltInHeaders: true };
 }
 
 // Android only: options arg arrives null over the Javet bridge, so set the target on the clients.

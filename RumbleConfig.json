@@ -63,6 +63,21 @@
 			"type": "Boolean",
 			"default": "true",
 			"isAdvanced": "true"
+		},
+		{
+			"variable": "impersonateTargetIndex",
+			"name": "Browser fingerprint",
+			"description": "Which browser TLS fingerprint to impersonate. Automatic tries Firefox, then Safari, then Chrome, and remembers the one that works. Chrome is blocked on most VPN and datacenter IPs.",
+			"type": "Dropdown",
+			"default": "0",
+			"options": [
+				"Automatic (recommended)",
+				"Firefox 133",
+				"Safari 17",
+				"Firefox 144",
+				"Chrome"
+			],
+			"isAdvanced": "true"
 		}
 	],
 	
