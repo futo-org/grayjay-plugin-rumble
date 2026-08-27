@@ -773,7 +773,7 @@ source.getSubComments = function (comment) {
 		try {
 			comment = JSON.parse(comment);
 		} catch (e) {
-			bridge.log("getSubComments: failed to parse comment - " + e);
+			trace("getSubComments: failed to parse comment - " + e);
 			return new CommentPager([], false);
 		}
 	}
@@ -785,7 +785,7 @@ source.getSubComments = function (comment) {
 		try {
 			replies = JSON.parse(raw);
 		} catch (e) {
-			bridge.log("getSubComments: failed to parse replies - " + e);
+			trace("getSubComments: failed to parse replies - " + e);
 		}
 	} else if (Array.isArray(raw)) {
 		replies = raw;
@@ -798,13 +798,13 @@ source.getSubComments = function (comment) {
 
 source.getUserSubscriptions = function () {
 	if (!bridge.isLoggedIn()) {
-		bridge.log("Failed to retrieve subscriptions page because not logged in.");
+		trace("Failed to retrieve subscriptions page because not logged in.");
 		return [];
 	}
 
 	const res = httpGET({ url: "https://rumble.com/account/channel/subscriptions", useAuthenticated: true });
 	if (res.code != 200) {
-		bridge.log("Failed to retrieve subscriptions page.");
+		trace("Failed to retrieve subscriptions page.");
 		return [];
 	}
 
@@ -814,7 +814,7 @@ source.getUserSubscriptions = function () {
 		const tables = doc.getElementsByTagName("table");
 		if (tables.length === 0) {
 			// No table - usually a stale-auth wall. Fail gracefully instead of crashing.
-			bridge.log("Failed to parse subscriptions page (no table found).");
+			trace("Failed to parse subscriptions page (no table found).");
 			return [];
 		}
 		const aElements = tables[0].getElementsByTagName("a");
@@ -888,7 +888,7 @@ source.getContentRecommendations = function (url, res) {
 	try {
 		data = JSON.parse(recRes.body);
 	} catch (e) {
-		log("Error parsing content recommendations " + e);
+		trace("Error parsing content recommendations " + e);
 		return new VideoPager([], false);
 	}
 
@@ -1545,7 +1545,7 @@ function extractSubCount(subscribersElement) {
 		
         return parsedCount ?? 0; // Return parsed value or fallback to 0
     } catch (error) {
-		log("Error parsing subscriber count " + error);
+		trace("Error parsing subscriber count " + error);
         return 0;
     }
 }
@@ -1748,7 +1748,7 @@ function httpGET(optionsOrUrl) {
 				}
 
 				// Persistent challenge - surface the captcha for manual solving
-				log(`Captcha detected for request: ${url}`);
+				trace(`Captcha detected for request: ${url}`);
 				noteCaptchaChallenge();
 				throw error;
 			}
@@ -1757,7 +1757,7 @@ function httpGET(optionsOrUrl) {
 			// that is a capability mismatch, not a network failure, so it must not cost an attempt.
 			if (isUnsupportedTargetError(error)) {
 				const missing = candidates[candidateIndex];
-				log(`Impersonate target [${missing}] unsupported by this build; falling back`);
+				trace(`Impersonate target [${missing}] unsupported by this build; falling back`);
 				unsupportedTargets.add(missing);
 				if (state.impersonateTarget === missing) {
 					state.impersonateTarget = null;
@@ -1798,8 +1798,8 @@ function httpGET(optionsOrUrl) {
 
 			if (attempts === 0) {
 				// All retry attempts failed
-				log(`Request failed after ${retries + 1} attempts: ${url}`);
-				log(lastError);
+				trace(`Request failed after ${retries + 1} attempts: ${url}`);
+				trace(lastError);
 				throw lastError;
 			}
 		}
@@ -1920,18 +1920,18 @@ function fetchClientIp() {
 		const res = httpGET({ url: 'https://rumble.com/cdn-cgi/trace', headers: {} });
 		if (res?.isOk && res.body) {
 			const t = parseTrace(res.body);
-			bridge.log(`RNSC trace ip=${t.ip} kex=${t.kex} tls=${t.tls} http=${t.http} loc=${t.loc} warp=${t.warp} colo=${t.colo} uag=${t.uag}`);
+			trace(`RNSC trace ip=${t.ip} kex=${t.kex} tls=${t.tls} http=${t.http} loc=${t.loc} warp=${t.warp} colo=${t.colo} uag=${t.uag}`);
 			if (t.ip) return t.ip;
 		}
 	} catch (error) {
-		bridge.log("RNSC IP lookup via cdn-cgi/trace failed, falling back to ipify: " + error);
+		trace("RNSC IP lookup via cdn-cgi/trace failed, falling back to ipify: " + error);
 	}
 
 	try {
 		const res = httpGET({ url: 'https://api.ipify.org', headers: {} });
 		if (res?.isOk && res.body) return String(res.body).trim();
 	} catch (error) {
-		bridge.log("RNSC IP lookup via ipify failed: " + error);
+		trace("RNSC IP lookup via ipify failed: " + error);
 	}
 	return null;
 }
@@ -1987,6 +1987,19 @@ function maybeShowNetworkToast() {
 		bridge.toast("Network changed - reconnecting...");
 		state.lastDnsToastMs = now;
 	}
+}
+
+// Boolean settings normally arrive as booleans, but string values are accepted defensively.
+function isSettingEnabled(value) {
+	return value === true || value === "true";
+}
+
+// Always write diagnostics to the log and optionally mirror them to an on-screen toast.
+function trace(message, { showToast = false } = {}) {
+	if (showToast || isSettingEnabled(settings.verboseNotifications)) {
+		bridge.toast(String(message));
+	}
+	log(message);
 }
 
 log("LOADED");

@@ -65,6 +65,14 @@
 			"isAdvanced": "true"
 		},
 		{
+			"variable": "verboseNotifications",
+			"name": "Verbose notifications",
+			"description": "Show toast notifications for plugin trace messages and failed requests (useful for debugging).",
+			"type": "Boolean",
+			"default": "false",
+			"isAdvanced": "true"
+		},
+		{
 			"variable": "impersonateTargetIndex",
 			"name": "Browser fingerprint",
 			"description": "Which browser TLS fingerprint to impersonate. Automatic tries Firefox, then Safari, then Chrome, and remembers the one that works. Chrome is blocked on most VPN and datacenter IPs.",
