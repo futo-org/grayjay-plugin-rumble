@@ -1683,6 +1683,7 @@ function httpGET(optionsOrUrl) {
 	let challengeRetryIndex = 0;
 	let candidates = impersonateCandidates();
 	let candidateIndex = 0;
+	let captchaFallbackUsed = false;
 
 	while (attempts > 0) {
 		try {
@@ -1711,6 +1712,10 @@ function httpGET(optionsOrUrl) {
 				throw new ScriptException("Request [" + url + "] failed with code [" + resp.code + "]");
 			}
 
+			if (captchaFallbackUsed) {
+				trace(`Captcha recovery succeeded with impersonate target [${target}] for request: ${url}`);
+			}
+
 			// Remember what got through so later requests skip straight to it.
 			if (settings.useHttpImp !== false && state.impersonateTarget !== target) {
 				state.impersonateTarget = target;
@@ -1729,8 +1734,13 @@ function httpGET(optionsOrUrl) {
 			lastError = error;
 
 			if (error instanceof CaptchaRequiredException) {
+				captchaFallbackUsed = true;
+
 				// A different fingerprint does not need to wait out a wave - rotate immediately.
 				if (candidateIndex < candidates.length - 1) {
+					const challengedTarget = candidates[candidateIndex];
+					const fallbackTarget = candidates[candidateIndex + 1];
+					trace(`Captcha challenge with impersonate target [${challengedTarget}]; falling back to [${fallbackTarget}] for request: ${url}`);
 					if (state.impersonateTarget === candidates[candidateIndex]) {
 						state.impersonateTarget = null;
 					}
@@ -1741,14 +1751,16 @@ function httpGET(optionsOrUrl) {
 				// Every fingerprint was challenged; the exit itself is likely blocked. Wait once and
 				// walk the chain again in case this is a transient wave.
 				if (challengeRetryIndex < challengeRetryDelaysMs.length) {
-					bridge.sleep(challengeRetryDelaysMs[challengeRetryIndex]);
+					const delayMs = challengeRetryDelaysMs[challengeRetryIndex];
+					trace(`All impersonate targets were challenged; retrying the fallback chain in ${delayMs} ms for request: ${url}`);
+					bridge.sleep(delayMs);
 					challengeRetryIndex++;
 					candidateIndex = 0;
 					continue;
 				}
 
 				// Persistent challenge - surface the captcha for manual solving
-				trace(`Captcha detected for request: ${url}`);
+				trace(`Captcha required after exhausting all impersonate target fallbacks for request: ${url}`);
 				noteCaptchaChallenge();
 				throw error;
 			}
