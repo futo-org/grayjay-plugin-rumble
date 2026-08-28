@@ -2011,7 +2011,8 @@ function trace(message, { showToast = false } = {}) {
 	if (showToast || isSettingEnabled(settings.verboseNotifications)) {
 		bridge.toast(String(message));
 	}
-	log(message);
+	// bridge.log JSON-serializes non-strings, which flattens an Error to "{}"; stringify first.
+	log(message instanceof Error ? String(message.stack ?? message) : message);
 }
 
 log("LOADED");
